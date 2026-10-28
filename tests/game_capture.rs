@@ -324,9 +324,9 @@ impl Action for Recorded<'_> {
 /// Per capture: how many bones of the skeleton the transform set is named after sit at their reference length from
 /// their parent (within 1e-4) in the first and in the last step. Measured on the frames files with an independent
 /// script (numpy, in `f64`): of the 138 bones of the player's skeleton with a parent and a reference offset longer
-/// than 1e-3, 110 in both steps (the next closest is 9e-4 off), where the same skeleton with its parents shuffled
-/// gives 5 to 7. The bones the game does not fill keep stale values.
-const AT_REFERENCE_LENGTH: [(&str, usize); 1] = [("muffler-cap4.clf3", 110)];
+/// than 1e-3, 110 in both steps of both scarf captures (the next closest is 9e-4 off), where the same skeleton with
+/// its parents shuffled gives 5 to 7. The bones the game does not fill keep stale values.
+const AT_REFERENCE_LENGTH: [(&str, usize); 2] = [("muffler-cap4.clf3", 110), ("muffler-cap5.clf3", 110)];
 
 /// The transform set a cloth data reads is the skeleton of its name in the same tagfile, bone for bone, in world
 /// space: transform i is bone i, whose distance to its parent's transform is the bone's reference offset.
