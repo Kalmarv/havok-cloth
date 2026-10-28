@@ -13,7 +13,8 @@ the same inputs give the game's particle positions to the bit on the machine the
   stiffness (flat and with a rest curvature, clamped or not), local range (sphere, cylinder, position only),
   transitions between animation and simulation, volume constraints, and the adaptive stiffness per substep.
 - **Collision** against the sim cloth's collidables: spheres, capsules, tapered capsules, planes and convex
-  geometries, moved by the bones they follow, with friction against their surface velocity.
+  geometries, moved by the bones they follow, with friction against their surface velocity; and the virtual
+  collision points sampled on the cloth's triangles and edges.
 - **Normals** of the particles from the sim cloth's triangles.
 - **Skinning and deformation**: the object-space and bone-space deformers that skin buffers and deform display
   meshes from the simulated mesh (triangle frames), with their packed and float vertex blocks.
@@ -23,7 +24,7 @@ the same inputs give the game's particle positions to the bit on the machine the
 - **Cloth instances**: a cloth data's buffers and transform sets at run time, stepped one cloth state at a time, and
   actions: forces the game adds on every substep.
 
-Virtual collision points and landscape collision are being added; see the changelog.
+Landscape (world geometry) collision is being added; see the changelog.
 
 ## Example
 

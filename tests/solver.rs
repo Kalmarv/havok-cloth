@@ -1050,3 +1050,59 @@ fn actions_add_their_forces_on_every_substep() {
     // after n substeps x = F dt^2 n(n+1)/2 with n = 6
     assert_eq!(f64::from(state.positions[0].x()), 4.0 / 4096.0 * 21.0);
 }
+
+#[test]
+fn a_virtual_point_inside_a_shape_pushes_its_particle_along_the_triangle_normal() {
+    use havok_formats::cloth::{
+        VirtualCollisionPoints, VirtualDictionaryEntry, VirtualTriangleFan, VirtualTriangleSection,
+    };
+    // particle 0's triangle (0, 1, 2) in the plane z = 0; one virtual point at its midpoint (1, 1, 0), 0.02 inside a
+    // unit sphere centred below it; the particles themselves are outside the sphere
+    let mut sim = sim_cloth(
+        &[v(0.0, 0.0, 0.0), v(2.0, 0.0, 0.0), v(0.0, 2.0, 0.0)],
+        &[1.0, 1.0, 1.0],
+        Vec::new(),
+    );
+    sim.max_particle_radius = 1.0;
+    sim.virtual_collision_points = VirtualCollisionPoints {
+        points: 1,
+        triangle_fan_indices: vec![0, 0xffff, 0xffff],
+        triangle_fans: vec![VirtualTriangleFan {
+            particle: 0,
+            vcp_start: 0,
+            triangles: 1,
+        }],
+        triangles: vec![VirtualTriangleSection {
+            opposite: [1, 2],
+            dictionary: 0,
+        }],
+        triangle_dictionary: vec![VirtualDictionaryEntry { start: 0, count: 1 }],
+        triangle_barycentrics: vec![(0.5, 0.5)],
+        edge_fan_indices: vec![0xffff; 3],
+        ..Default::default()
+    };
+    let data = ParticleData::new(&sim);
+    let mut state = SimState::new(&sim);
+    let collidable = RuntimeCollidable {
+        transform: Mat4::IDENTITY,
+        linear_velocity: V4::ZERO,
+        angular_velocity: V4::ZERO,
+        shape: Shape::Sphere {
+            pos: [1.0, 1.0, -0.98, 1.0],
+        },
+        enabled: true,
+        virtual_collision_points: true,
+    };
+    collide::collide(&sim, &[collidable], &mut state, &data, 1.0 / 60.0);
+    // depth: (0.98 - 1) - radius 0.01 = -0.03, along the triangle's normal (0, 0, 1)
+    let p = state.positions[0];
+    assert!((p.z() - 0.03).abs() < 1e-6, "{p:?}");
+    assert_eq!((p.x(), p.y()), (0.0, 0.0));
+    assert_eq!(state.positions[1], v(2.0, 0.0, 0.0));
+    assert_eq!(state.positions[2], v(0.0, 2.0, 0.0));
+    assert_eq!(
+        state.previous[0],
+        v(0.0, 0.0, 0.0),
+        "previous positions are left alone"
+    );
+}

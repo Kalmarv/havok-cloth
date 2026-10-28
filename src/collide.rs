@@ -738,15 +738,7 @@ pub fn collide(
         if !collidable.enabled {
             continue;
         }
-        let mask = 1u32 << index.min(30);
-        let volume =
-            WorldShape::bounding_volume(&collidable.shape, &collidable.transform, sim.max_particle_radius);
-        let particles: Vec<usize> = (0..state.positions.len())
-            .filter(|&p| {
-                sim.static_collision_masks.get(p).is_some_and(|m| m & mask != 0)
-                    && volume.contains(state.positions[p])
-            })
-            .collect();
+        let particles = collected(sim, collidable, index, &state.positions);
         if particles.is_empty() {
             continue;
         }
@@ -788,6 +780,117 @@ pub fn collide(
                     &mut previous[i],
                     dt,
                 );
+            }
+        }
+    }
+    // the virtual collision points, against the collidables that collide with them
+    if sim.virtual_collision_points.points > 0 {
+        for (index, collidable) in collidables.iter().enumerate() {
+            if !collidable.enabled || !collidable.virtual_collision_points {
+                continue;
+            }
+            let particles = collected(sim, collidable, index, &state.positions);
+            if particles.is_empty() {
+                continue;
+            }
+            let shape = WorldShape::new(&collidable.shape, &collidable.transform);
+            virtual_points(sim, &shape, &particles, &mut state.positions, data);
+        }
+    }
+}
+
+/// The particles a collidable is tested against: those whose static collision mask has the collidable's bit
+/// (`1 << min(index, 30)`) and that lie in its bounding volume.
+fn collected(sim: &SimCloth, collidable: &RuntimeCollidable, index: usize, positions: &[V4]) -> Vec<usize> {
+    let mask = 1u32 << index.min(30);
+    let volume =
+        WorldShape::bounding_volume(&collidable.shape, &collidable.transform, sim.max_particle_radius);
+    (0..positions.len())
+        .filter(|&p| {
+            sim.static_collision_masks.get(p).is_some_and(|m| m & mask != 0) && volume.contains(positions[p])
+        })
+        .collect()
+}
+
+/// The virtual collision points of the collected particles against one shape (`QUERY_COLLIDABLE`). For each
+/// particle with a triangle fan: each triangle's points `p0 + (p1 - p0)*u + (p2 - p0)*v` (from the particle's current
+/// position, the edges fixed per triangle) are queried one at a time with the particle's radius; a point inside pushes
+/// the particle out along the triangle's normal (refined, turned to face the contact normal) by its depth. Then, for
+/// each particle with an edge fan, each edge's points `p0 + (p1 - p0)*u` push it out along the contact normal. The
+/// previous positions are left as they are.
+fn virtual_points(
+    sim: &SimCloth,
+    shape: &WorldShape,
+    particles: &[usize],
+    positions: &mut [V4],
+    data: &ParticleData,
+) {
+    let vcp = &sim.virtual_collision_points;
+    let at = |positions: &[V4], i: u16| positions.get(usize::from(i)).copied().unwrap_or(V4::ZERO);
+    for &rp in particles {
+        let Some(&fan_index) = vcp.triangle_fan_indices.get(rp) else {
+            continue;
+        };
+        let Some(fan) = vcp.triangle_fans.get(usize::from(fan_index)) else {
+            continue;
+        };
+        let radius = data.radius[rp];
+        for j in 0..u16::from(fan.triangles) {
+            let Some(section) = vcp.triangles.get(usize::from(fan.vcp_start + j)) else {
+                continue;
+            };
+            let p0 = positions[rp];
+            let p01 = at(positions, section.opposite[0]).sub(p0);
+            let p02 = at(positions, section.opposite[1]).sub(p0);
+            let Some(entry) = vcp.triangle_dictionary.get(usize::from(section.dictionary)) else {
+                continue;
+            };
+            for k in 0..u16::from(entry.count) {
+                let Some(&(u, v)) = vcp.triangle_barycentrics.get(usize::from(entry.start + k)) else {
+                    continue;
+                };
+                let point = positions[rp].add_scaled(p01, u).add_scaled(p02, v);
+                let contact = shape.closest(point, radius);
+                let depth = contact.distance - radius;
+                if depth < 0.0 {
+                    let mut normal = p01.cross(p02).normalized();
+                    if normal.dot3(contact.normal) < 0.0 {
+                        normal = normal.neg3();
+                    }
+                    positions[rp] = positions[rp].sub_scaled(normal, depth);
+                }
+            }
+        }
+    }
+    if vcp.edge_fans.is_empty() {
+        return;
+    }
+    for &rp in particles {
+        let Some(&fan_index) = vcp.edge_fan_indices.get(rp) else {
+            continue;
+        };
+        let Some(fan) = vcp.edge_fans.get(usize::from(fan_index)) else {
+            continue;
+        };
+        let radius = data.radius[rp];
+        for j in 0..u16::from(fan.edges) {
+            let Some(section) = vcp.edges.get(usize::from(fan.edge_start + j)) else {
+                continue;
+            };
+            let p01 = at(positions, section.opposite).sub(positions[rp]);
+            let Some(entry) = vcp.edge_dictionary.get(usize::from(section.dictionary)) else {
+                continue;
+            };
+            for k in 0..u16::from(entry.count) {
+                let Some(&u) = vcp.edge_barycentrics.get(usize::from(entry.start + k)) else {
+                    continue;
+                };
+                let point = positions[rp].add_scaled(p01, u);
+                let contact = shape.closest(point, radius);
+                let depth = contact.distance - radius;
+                if depth < 0.0 {
+                    positions[rp] = positions[rp].sub_scaled(contact.normal, depth);
+                }
             }
         }
     }
