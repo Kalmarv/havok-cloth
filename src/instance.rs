@@ -53,6 +53,8 @@ pub struct ClothInstance<'a> {
     pub sims: Vec<SimState>,
     particles: Vec<ParticleData>,
     /// The transform sets, by definition: the caller sets the bones before a step, and bone deformers write theirs.
+    /// In both games' files a transform set is the skeleton of its name in the same tagfile (its animation
+    /// container's): transform i is the world transform of that skeleton's bone i.
     pub transform_sets: Vec<Vec<Mat4>>,
     /// The cloth state run by [`ClothInstance::step`].
     pub state: usize,

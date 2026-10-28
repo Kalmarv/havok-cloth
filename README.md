@@ -44,6 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut state = SimState::new(sim);
         for _frame in 0..60 {
             // the bone transforms that drive the collidables, world from bone, one a bone of the transform set
+            // (the skeleton of the transform set's name in the same file: transform i is its bone i)
             let bones = [];
             simulate::prepare(&mut state, 1.0 / 60.0, configs[0].sub_steps, StiffnessModel::Legacy);
             simulate::simulate(sim, &configs[0], &mut state, &particles, &[], &bones, &mut [], 1.0 / 60.0);

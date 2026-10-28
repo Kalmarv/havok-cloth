@@ -29,6 +29,7 @@ use havok_cloth::operators;
 use havok_cloth::simd::V4;
 use havok_cloth::simulate::{self, Action, ParticleData, SimState, StiffnessModel};
 use havok_formats::Tagfile;
+use havok_formats::animation::{self, Skeleton};
 use havok_formats::cloth::{self, Cloth, OperatorKind, SimulateConfig};
 use inputs::{Game, OracleSet, Query, expect_found, resolve};
 use std::path::Path;
@@ -155,11 +156,12 @@ fn worst3(ours: &[V4], game: &[V4]) -> u32 {
         .unwrap_or(0)
 }
 
-/// One capture: its steps and the cloth data they belong to.
+/// One capture: its steps, the cloth data they belong to, and the skeleton its transform set is named after.
 struct Capture {
     name: String,
     processor: String,
     cloth: Cloth,
+    skeleton: Skeleton,
     steps: Vec<Step>,
 }
 
@@ -181,12 +183,20 @@ fn captures(game: Game) -> Vec<Capture> {
             panic!("captures.tsv: not four columns: {line}");
         };
         let bytes = std::fs::read(corpus_dir.join(tagfile)).unwrap();
-        let physics = cloth::read(&Tagfile::read(&bytes, None).unwrap()).unwrap();
+        let tag = Tagfile::read(&bytes, None).unwrap();
+        let physics = cloth::read(&tag).unwrap();
         let cloth = physics
             .cloths
             .into_iter()
             .find(|c| c.name == *cloth_name)
             .unwrap_or_else(|| panic!("{tagfile} has no cloth data {cloth_name}"));
+        let set = &cloth.transform_sets[0].name;
+        let skeleton = animation::container(&tag)
+            .unwrap()
+            .skeletons
+            .into_iter()
+            .find(|s| s.name == *set)
+            .unwrap_or_else(|| panic!("{tagfile} has no skeleton {set}"));
         let (particles, steps) = read_steps(&dir.join(frames));
         let sim = simulated(&cloth).0;
         assert_eq!(
@@ -198,6 +208,7 @@ fn captures(game: Game) -> Vec<Capture> {
             name: (*frames).to_owned(),
             processor: (*processor).to_owned(),
             cloth,
+            skeleton,
             steps,
         });
     }
@@ -307,6 +318,55 @@ impl Action for Recorded<'_> {
             forces.copy_from_slice(&f[..forces.len()]);
         }
         self.next += 1;
+    }
+}
+
+/// Per capture: how many bones of the skeleton the transform set is named after sit at their reference length from
+/// their parent (within 1e-4) in the first and in the last step. Measured on the frames files with an independent
+/// script (numpy, in `f64`): of the 138 bones of the player's skeleton with a parent and a reference offset longer
+/// than 1e-3, 110 in both steps (the next closest is 9e-4 off), where the same skeleton with its parents shuffled
+/// gives 5 to 7. The bones the game does not fill keep stale values.
+const AT_REFERENCE_LENGTH: [(&str, usize); 1] = [("muffler-cap4.clf3", 110)];
+
+/// The transform set a cloth data reads is the skeleton of its name in the same tagfile, bone for bone, in world
+/// space: transform i is bone i, whose distance to its parent's transform is the bone's reference offset.
+#[test]
+fn the_transform_set_is_the_skeleton_of_its_name_in_world_space() {
+    for capture in captures(Game::Sekiro) {
+        let s = &capture.skeleton;
+        assert_eq!(
+            s.bones.len(),
+            capture.cloth.transform_sets[0].transforms as usize,
+            "{}: bones",
+            capture.name
+        );
+        let want = AT_REFERENCE_LENGTH
+            .iter()
+            .find(|(name, _)| *name == capture.name)
+            .unwrap_or_else(|| panic!("{}: no expected count measured", capture.name))
+            .1;
+        let length = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        for step in [capture.steps.first().unwrap(), capture.steps.last().unwrap()] {
+            assert_eq!(step.bones.len(), s.bones.len(), "{}: transforms", capture.name);
+            let at = |i: usize| step.bones[i].cols[3].0.map(f64::from);
+            let mut matched = 0;
+            for (i, &parent) in s.parents.iter().enumerate().skip(1) {
+                let Ok(parent) = usize::try_from(parent) else {
+                    continue;
+                };
+                let offset = length(std::array::from_fn(|k| {
+                    f64::from(s.reference_pose[i].translation[k])
+                }));
+                if offset <= 1e-3 {
+                    continue;
+                }
+                let (a, b) = (at(i), at(parent));
+                if (length(std::array::from_fn(|k| a[k] - b[k])) - offset).abs() < 1e-4 {
+                    matched += 1;
+                }
+            }
+            assert_eq!(matched, want, "{}: bones at their reference length", capture.name);
+        }
     }
 }
 
