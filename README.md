@@ -74,8 +74,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   their results).
 - It does not collide with world geometry (the games' landscape collision, which 13 Sekiro and 80 Elden Ring sim
   cloths enable) beyond the contact planes a caller provides.
-- It does not implement what neither game's data uses: wind and other actions, anti-pinch constraints, transfer motion,
-  state transitions, blend operators.
+- It does not implement the games' own actions: Sekiro adds a force to its characters' cloth at run time, which no
+  cloth file holds. A caller supplies such forces through `simulate::Action`.
+- It does not implement what neither game's data uses: anti-pinch constraints, transfer motion, state transitions,
+  blend operators.
 
 ## Tests
 
