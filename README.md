@@ -11,7 +11,7 @@ the same inputs give the game's particle positions to the bit on the machine the
   previous positions when the timestep changes, and pinned particles stepped linearly through the substeps.
 - **Constraint sets**, in each simulate configuration's order: standard, stretch, compressible and bend links, bend
   stiffness (flat and with a rest curvature, clamped or not), local range (sphere, cylinder, position only),
-  transitions between animation and simulation, and the adaptive stiffness per substep.
+  transitions between animation and simulation, volume constraints, and the adaptive stiffness per substep.
 - **Collision** against the sim cloth's collidables: spheres, capsules, tapered capsules, planes and convex
   geometries, moved by the bones they follow, with friction against their surface velocity.
 - **Normals** of the particles from the sim cloth's triangles.
@@ -23,7 +23,7 @@ the same inputs give the game's particle positions to the bit on the machine the
 - **Cloth instances**: a cloth data's buffers and transform sets at run time, stepped one cloth state at a time, and
   actions: forces the game adds on every substep.
 
-Volume constraints, virtual collision points and landscape collision are being added; see the changelog.
+Virtual collision points and landscape collision are being added; see the changelog.
 
 ## Example
 

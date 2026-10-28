@@ -16,3 +16,4 @@ pub mod matrix;
 pub mod operators;
 pub mod simd;
 pub mod simulate;
+pub mod volume;

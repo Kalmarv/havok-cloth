@@ -27,6 +27,8 @@ The first version: the simulate operator for one sim cloth, as Sekiro and Elden 
 - `deform`: the bone-space skin composite, and the bones the mesh bone deformers place on triangles (single and
   weighted).
 - `operators`: the vertex frames update of a selection of vertices.
+- `volume`: the volume constraint (weighted centre, the rotation of the polar decomposition from a symmetric
+  eigen-solve warm-started from the last, particles moved towards their rest offsets in that frame).
 - `simulate`: actions, the forces a game adds to a sim cloth on every substep (Sekiro adds one to its characters'
   cloth at run time: the data holds none).
 - Tests: unit tests of every step against independent expectations, and every sim cloth of both installs simulated

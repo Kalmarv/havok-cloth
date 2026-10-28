@@ -5,6 +5,7 @@ use crate::collide::{self, RuntimeCollidable};
 use crate::constraints::{self, BendRestPose, Particles, Transition, TransitionPeriods};
 use crate::matrix::Mat4;
 use crate::simd::V4;
+use crate::volume::{self, VolumeState};
 use havok_formats::cloth::{ConstraintKind, ConstraintSet, SimCloth, SimulateConfig};
 
 /// How a constraint set's stiffness is scaled for a substep.
@@ -39,6 +40,8 @@ pub struct SimState {
     pub world_stepping: f32,
     /// Per constraint set, the transition state of a transition set.
     pub transitions: Vec<Option<Transition>>,
+    /// Per constraint set, the state of a volume set (its last frame and eigenvectors).
+    pub volumes: Vec<Option<VolumeState>>,
     /// The collidables as the solver moves them.
     pub collidables: Vec<RuntimeCollidable>,
 }
@@ -69,6 +72,11 @@ impl SimState {
                     matches!(c.kind, ConstraintKind::Transition { .. })
                         .then(|| Transition::new(sim.particles.len()))
                 })
+                .collect(),
+            volumes: sim
+                .constraint_sets
+                .iter()
+                .map(|c| matches!(c.kind, ConstraintKind::VolumeMx { .. }).then(VolumeState::default))
                 .collect(),
             collidables: sim.collidables.iter().map(RuntimeCollidable::new).collect(),
         }
@@ -207,6 +215,7 @@ fn apply_set(
         positions,
         previous,
         transitions,
+        volumes,
         ..
     } = state;
     let mut p = Particles {
@@ -283,7 +292,25 @@ fn apply_set(
                 );
             }
         }
-        ConstraintKind::VolumeMx { .. } | ConstraintKind::Other { .. } => {}
+        ConstraintKind::VolumeMx {
+            frame_batches,
+            frame_singles,
+            apply_batches,
+            apply_singles,
+        } => {
+            if let Some(Some(v)) = volumes.get_mut(index) {
+                volume::apply(
+                    p.positions,
+                    v,
+                    frame_batches,
+                    frame_singles,
+                    apply_batches,
+                    apply_singles,
+                    s,
+                );
+            }
+        }
+        ConstraintKind::Other { .. } => {}
     }
 }
 
