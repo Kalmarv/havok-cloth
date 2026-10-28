@@ -218,12 +218,13 @@ impl V4 {
         (p[0] + p[1]) + p[2]
     }
 
-    /// The plane distance `self . (p.xyz, 1)` as the SSE2 build sums it: `(x*px + y*py) + (z*pz + w)`.
+    /// The plane distance `self . (p.xyz, 1)` as the games' plane queries sum it (the plane shape's and the landscape
+    /// contact planes', four particles at a time): the three-lane dot, then the offset, `((x*px + y*py) + z*pz) + w`.
     #[inline]
     pub fn dot4_xyz1(self, p: V4) -> f32 {
         let [x, y, z, w] = self.0;
         let [a, b, c, _] = p.0;
-        (x * a + y * b) + (z * c + w)
+        ((x * a + y * b) + z * c) + w
     }
 
     /// The cross product of `x y z`: lane i is `self_i * o_(i+1) - o_i * self_(i+1)` rotated into place, so
@@ -313,14 +314,14 @@ mod tests {
     }
 
     #[test]
-    fn plane_distance_pairs_the_sums() {
-        // (x*px + y*py) + (z*pz + w): 2^24 + 1 rounds to 2^24 (ties to even), 3 - 1 = 2, so the sum is 2^24 + 2;
-        // summed left to right, ((2^24 + 1) + 3) - 1 rounds twice to 2^24 + 4
+    fn plane_distance_adds_the_offset_last() {
+        // ((x*px + y*py) + z*pz) + w: 2^24 + 1 rounds to 2^24 (ties to even), 2^24 + 3 to 2^24 + 4 (ties to even),
+        // and 2^24 + 4 - 1 = 2^24 + 3 to 2^24 + 4 again; pairing the sums instead, (2^24 + 1) + (3 - 1), gives 2^24 + 2
         let plane = V4::new(1.0, 1.0, 1.0, -1.0);
         let p = V4::new(16_777_216.0, 1.0, 3.0, 0.0);
-        let left_to_right = ((16_777_216.0f32 + 1.0) + 3.0) - 1.0;
-        assert_eq!(plane.dot4_xyz1(p), 16_777_218.0);
-        assert_eq!(left_to_right, 16_777_220.0);
+        let paired = (16_777_216.0f32 + 1.0) + (3.0 - 1.0);
+        assert_eq!(plane.dot4_xyz1(p), 16_777_220.0);
+        assert_eq!(paired, 16_777_218.0);
     }
 
     #[test]
