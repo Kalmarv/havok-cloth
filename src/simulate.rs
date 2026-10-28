@@ -44,6 +44,9 @@ pub struct SimState {
     pub volumes: Vec<Option<VolumeState>>,
     /// The collidables as the solver moves them.
     pub collidables: Vec<RuntimeCollidable>,
+    /// The landscape contact plane of each particle (`x y z` the normal, `w` the offset), as the game computes them
+    /// from the world before a step; empty: no landscape collision.
+    pub landscape_planes: Vec<V4>,
 }
 
 impl SimState {
@@ -79,6 +82,7 @@ impl SimState {
                 .map(|c| matches!(c.kind, ConstraintKind::VolumeMx { .. }).then(VolumeState::default))
                 .collect(),
             collidables: sim.collidables.iter().map(RuntimeCollidable::new).collect(),
+            landscape_planes: Vec::new(),
         }
     }
 }

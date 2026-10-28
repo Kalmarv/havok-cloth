@@ -783,6 +783,9 @@ pub fn collide(
             }
         }
     }
+    if !state.landscape_planes.is_empty() {
+        landscape(sim, state, data, dt);
+    }
     // the virtual collision points, against the collidables that collide with them
     if sim.virtual_collision_points.points > 0 {
         for (index, collidable) in collidables.iter().enumerate() {
@@ -795,6 +798,79 @@ pub fn collide(
             }
             let shape = WorldShape::new(&collidable.shape, &collidable.transform);
             virtual_points(sim, &shape, &particles, &mut state.positions, data);
+        }
+    }
+}
+
+/// The landscape collidable (after the per-instance ones): each particle whose static collision mask has bit 31 is
+/// tested against its own contact plane (`x y z` the normal, `w` the offset), as the game computes them from the
+/// world. Four at a time, the plane distance is `((dot3 + w) + radius)`; one at a time, `dot4xyz1 + radius`; the
+/// contact point is the particle moved back along the normal by that distance. The landscape does not move.
+fn landscape(sim: &SimCloth, state: &mut SimState, data: &ParticleData, dt: f32) {
+    let still = RuntimeCollidable {
+        transform: Mat4::IDENTITY,
+        linear_velocity: V4::ZERO,
+        angular_velocity: V4::ZERO,
+        shape: Shape::Sphere { pos: [0.0; 4] },
+        enabled: true,
+        virtual_collision_points: false,
+    };
+    let particles: Vec<usize> = (0..state.positions.len())
+        .filter(|&p| {
+            sim.static_collision_masks
+                .get(p)
+                .is_some_and(|m| m & 0x8000_0000 != 0)
+        })
+        .filter(|&p| p < state.landscape_planes.len())
+        .collect();
+    let plane_contact = |plane: V4, p: V4, distance: f32| Contact {
+        point: p.sub_scaled(plane, distance),
+        normal: plane,
+        distance,
+    };
+    let (groups, rest) = particles.as_chunks::<4>();
+    for &ix in groups {
+        let contacts: [Contact; 4] = ix.map(|i| {
+            let plane = state.landscape_planes[i];
+            let p = state.positions[i];
+            plane_contact(plane, p, (plane.dot3(p) + plane.w()) + data.radius[i])
+        });
+        for (&i, contact) in ix.iter().zip(&contacts) {
+            let r = data.radius[i];
+            if contact.distance - r < 0.0 {
+                let SimState {
+                    positions, previous, ..
+                } = state;
+                solve_contact(
+                    contact,
+                    &still,
+                    r,
+                    data.friction[i],
+                    &mut positions[i],
+                    &mut previous[i],
+                    dt,
+                );
+            }
+        }
+    }
+    for &i in rest {
+        let plane = state.landscape_planes[i];
+        let p = state.positions[i];
+        let r = data.radius[i];
+        let contact = plane_contact(plane, p, plane.dot4_xyz1(p) + r);
+        if contact.distance - r < 0.0 {
+            let SimState {
+                positions, previous, ..
+            } = state;
+            solve_contact(
+                &contact,
+                &still,
+                r,
+                data.friction[i],
+                &mut positions[i],
+                &mut previous[i],
+                dt,
+            );
         }
     }
 }

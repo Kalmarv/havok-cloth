@@ -1106,3 +1106,26 @@ fn a_virtual_point_inside_a_shape_pushes_its_particle_along_the_triangle_normal(
         "previous positions are left alone"
     );
 }
+
+#[test]
+fn landscape_planes_push_particles_onto_their_plane() {
+    // six particles 0.05 below the plane z = 0 (normal +z); the first five have bit 31 of their collision mask (four
+    // queried together, one alone), the sixth has not
+    let positions: Vec<V4> = (0..6).map(|i| v(i as f32, 0.0, -0.05)).collect();
+    let mut sim = sim_cloth(&positions, &[1.0; 6], Vec::new());
+    sim.static_collision_masks = vec![0x8000_0000, 0x8000_0000, 0x8000_0000, 0x8000_0000, 0x8000_0000, 0];
+    let data = ParticleData::new(&sim);
+    let mut state = SimState::new(&sim);
+    state.landscape_planes = vec![V4::new(0.0, 0.0, 1.0, 0.0); 6];
+    collide::collide(&sim, &[], &mut state, &data, 1.0 / 60.0);
+    for i in 0..5 {
+        let p = state.positions[i];
+        assert!(p.z().abs() < 1e-7, "particle {i} at {p:?}");
+        assert_eq!((p.x(), p.y()), (i as f32, 0.0));
+    }
+    assert_eq!(
+        state.positions[5],
+        v(5.0, 0.0, -0.05),
+        "no landscape bit: untouched"
+    );
+}

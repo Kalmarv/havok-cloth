@@ -27,7 +27,9 @@ The first version: the simulate operator for one sim cloth, as Sekiro and Elden 
 - `deform`: the bone-space skin composite, and the bones the mesh bone deformers place on triangles (single and
   weighted).
 - `operators`: the vertex frames update of a selection of vertices.
-- `collide`: virtual collision points against the collidables that collide with them (triangle and edge fans).
+- `collide`: virtual collision points against the collidables that collide with them (triangle and edge fans), and
+  landscape collision against per-particle contact planes the caller supplies (the game computes them from the
+  world).
 - `volume`: the volume constraint (weighted centre, the rotation of the polar decomposition from a symmetric
   eigen-solve warm-started from the last, particles moved towards their rest offsets in that frame).
 - `simulate`: actions, the forces a game adds to a sim cloth on every substep (Sekiro adds one to its characters'
