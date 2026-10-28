@@ -14,5 +14,12 @@ The first version: the simulate operator for one sim cloth, as Sekiro and Elden 
 - `collide`: collidables driven by bones and stepped through the substeps, the closest-point queries of spheres,
   capsules, tapered capsules, planes and convex geometries (four at a time and one at a time, as the games query them),
   and the contact solve with friction.
+- `deform`: the object-space deformer (one to eight bones a vertex, packed or float local blocks, the composite
+  matrices of the skin operators) and the bone-space deformer; the triangle frames of the mesh-mesh deform operators
+  with their three normal-scaling modes. Recorded from Sekiro, the object-space skin and the particle move place every
+  pinned particle of the player's scarf bit-exactly on 299 of 299 steps.
+- `operators`: copy, gather (all and some vertices), moving particles to their reference vertices, and the vertex
+  frames update (normals, tangents, bitangents).
+- `buffer`: a buffer carries both of its matrices (`world_from_mesh` and `mesh_from_world`), as the game supplies them.
 - Tests: unit tests of every step against independent expectations, and every sim cloth of both installs simulated
   from its rest pose (`GAME_DATA`).

@@ -17,6 +17,8 @@ pub struct Buffer {
     pub bitangents: Vec<V4>,
     /// The matrix from the buffer's space to world space (the identity when its vertices are in world space).
     pub world_from_mesh: Mat4,
+    /// Its inverse, as the game supplies it: skinning writes vertices into the buffer's space through it.
+    pub mesh_from_world: Mat4,
 }
 
 impl Buffer {
@@ -28,6 +30,7 @@ impl Buffer {
             tangents: Vec::new(),
             bitangents: Vec::new(),
             world_from_mesh: Mat4::IDENTITY,
+            mesh_from_world: Mat4::IDENTITY,
         }
     }
 

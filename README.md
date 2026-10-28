@@ -15,9 +15,13 @@ the same inputs give the game's particle positions to the bit on the machine the
 - **Collision** against the sim cloth's collidables: spheres, capsules, tapered capsules, planes and convex
   geometries, moved by the bones they follow, with friction against their surface velocity.
 - **Normals** of the particles from the sim cloth's triangles.
+- **Skinning and deformation**: the object-space and bone-space deformers that skin buffers and deform display
+  meshes from the simulated mesh (triangle frames), with their packed and float vertex blocks.
+- **Vertex operators**: copies, gathers, moving pinned particles to their skinned vertices, and the update of
+  normals, tangents and bitangents.
 
-The operators around the simulation (skinning, moving the pinned particles, mesh and bone deformation, vertex copies,
-gathers and conversions), volume constraints and virtual collision points are being added; see the changelog.
+The cloth instance that runs a state's operators in order, bone-driving operators, conversions, volume constraints and
+virtual collision points are being added; see the changelog.
 
 ## Example
 

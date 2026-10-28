@@ -58,9 +58,32 @@ impl Mat4 {
             .add_scaled(c2, p.z())
     }
 
+    /// A four-lane vector times the matrix, as `hkMatrix4` does it: `((c0*x + c1*y) + c2*z) + c3*w`.
+    pub fn multiply_vector(&self, v: V4) -> V4 {
+        let [c0, c1, c2, c3] = self.cols;
+        c0.scale(v.x())
+            .add_scaled(c1, v.y())
+            .add_scaled(c2, v.z())
+            .add_scaled(c3, v.w())
+    }
+
     /// A point moved as an `hkTransform` does it: the rotated direction `(c0*x + c1*y) + c2*z`, then `+ c3`.
     pub fn transform_position_rigid(&self, p: V4) -> V4 {
         self.transform_direction(p).add(self.cols[3])
+    }
+
+    /// Every lane of every column times `s`.
+    pub fn scale(&self, s: f32) -> Mat4 {
+        Mat4 {
+            cols: self.cols.map(|c| c.scale(s)),
+        }
+    }
+
+    /// The column-wise sum, every lane.
+    pub fn add(&self, b: &Mat4) -> Mat4 {
+        Mat4 {
+            cols: [0, 1, 2, 3].map(|i| self.cols[i].add(b.cols[i])),
+        }
     }
 
     /// `self * b` for affine matrices: each of `b`'s first three columns as a direction, its fourth as a point.
