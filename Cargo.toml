@@ -1,0 +1,43 @@
+[package]
+name = "havok-cloth"
+description = "Havok cloth simulation as Sekiro and Elden Ring run it, from the cloth data havok-formats reads"
+keywords = ["havok", "cloth", "gamedev", "modding", "simulation"]
+categories = ["simulation", "game-development"]
+readme = "README.md"
+documentation = "https://docs.rs/havok-cloth"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Kalmarv/havok-cloth"
+publish = true
+
+[dependencies]
+havok-formats = { version = "0.7.0", git = "https://github.com/Kalmarv/havok-formats", rev = "12ed7973bb010da21a7797cc913b93a267749bcb" }
+thiserror = { version = "=2.0.21", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+primase-testdata = { version = "0.1.0", git = "https://github.com/Kalmarv/primase-testdata", rev = "d0258530ca9ca0ca74e957716ae8683e7facc8a7" }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+missing_docs = "deny"
+unused_must_use = "deny"
+
+[lints.clippy]
+float_cmp = "allow"
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+iter_over_hash_type = "deny"
+# file and process access is denied in lib.rs; tests and examples read game files
+disallowed_methods = "allow"
+disallowed_types = "allow"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
+
+[profile.test]
+opt-level = 1
