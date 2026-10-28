@@ -323,16 +323,21 @@ impl Action for Recorded<'_> {
 
 /// Per capture: how many bones of the skeleton the transform set is named after sit at their reference length from
 /// their parent (within 1e-4) in the first and in the last step. Measured on the frames files with an independent
-/// script (numpy, in `f64`): of the 138 bones of the player's skeleton with a parent and a reference offset longer
-/// than 1e-3, 110 in both steps of both scarf captures (the next closest is 9e-4 off), where the same skeleton with
-/// its parents shuffled gives 5 to 7. The bones the game does not fill keep stale values.
-const AT_REFERENCE_LENGTH: [(&str, usize); 2] = [("muffler-cap4.clf3", 110), ("muffler-cap5.clf3", 110)];
+/// script (numpy, in `f64`): in Sekiro, of the 138 bones of the player's skeleton with a parent and a reference offset
+/// longer than 1e-3, 110 in both steps of both scarf captures (the next closest is 9e-4 off), where the same skeleton
+/// with its parents shuffled gives 5 to 7 (the bones the game does not fill keep stale values); in Elden Ring, 123 of
+/// 124 (the next closest is 11 off), shuffled 4 to 8.
+const AT_REFERENCE_LENGTH: [(&str, usize); 3] = [
+    ("muffler-cap4.clf3", 110),
+    ("muffler-cap5.clf3", 110),
+    ("rearrope-cap1.clf3", 123),
+];
 
 /// The transform set a cloth data reads is the skeleton of its name in the same tagfile, bone for bone, in world
 /// space: transform i is bone i, whose distance to its parent's transform is the bone's reference offset.
 #[test]
 fn the_transform_set_is_the_skeleton_of_its_name_in_world_space() {
-    for capture in captures(Game::Sekiro) {
+    for capture in [Game::Sekiro, Game::Elden].into_iter().flat_map(captures) {
         let s = &capture.skeleton;
         assert_eq!(
             s.bones.len(),
@@ -370,12 +375,12 @@ fn the_transform_set_is_the_skeleton_of_its_name_in_world_space() {
     }
 }
 
-/// The first capture of the scarf of Sekiro's player (`BD_M_9040_muffler`, 299 steps) gave these on the processor
-/// it was made on: the notify's rescaling of the previous positions, and the pinned particles moved onto the skin,
-/// bit for bit in every step.
+/// The notify's rescaling of the previous positions, and the pinned particles moved onto the skin, bit for bit in every
+/// step of every capture. The first capture of the scarf of Sekiro's player (`BD_M_9040_muffler`, 299 steps) gave
+/// these on the processor it was made on; the others have not been replayed yet.
 #[test]
 fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
-    for capture in captures(Game::Sekiro) {
+    for capture in [Game::Sekiro, Game::Elden].into_iter().flat_map(captures) {
         let c = &capture.cloth;
         let (sim, config) = simulated(c);
         let model = if config.adapt_constraint_stiffness {
@@ -439,7 +444,7 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
             first Sekiro capture while the four-lane dot summed in another order than the game's, and the positions \
             have not been compared with the action forces played back"]
 fn the_simulate_step_matches_the_game_bit_for_bit() {
-    for capture in captures(Game::Sekiro) {
+    for capture in [Game::Sekiro, Game::Elden].into_iter().flat_map(captures) {
         if std::env::var("PROCESSOR_IDENTIFIER").ok().as_deref() != Some(capture.processor.as_str()) {
             eprintln!(
                 "{}: made on {}, not compared on another processor",
