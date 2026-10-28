@@ -86,6 +86,13 @@ impl Mat4 {
         }
     }
 
+    /// `self * b`, the full product: each of `b`'s columns through [`Mat4::multiply_vector`].
+    pub fn mul(&self, b: &Mat4) -> Mat4 {
+        Mat4 {
+            cols: b.cols.map(|c| self.multiply_vector(c)),
+        }
+    }
+
     /// `self * b` for affine matrices: each of `b`'s first three columns as a direction, its fourth as a point.
     pub fn mul_affine(&self, b: &Mat4) -> Mat4 {
         Mat4 {

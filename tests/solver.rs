@@ -159,7 +159,7 @@ fn free_fall_follows_the_verlet_closed_form_exactly() {
     let dt = 1.0f32 / 64.0;
     state.damping = 1.0;
     for n in 1..=120u32 {
-        simulate::integrate(&mut state, &data.mass, &data.inv_mass, dt);
+        simulate::integrate(&mut state, &data.mass, &data.inv_mass, &[], dt);
         let want = -8.0 * f64::from(dt) * f64::from(dt) * f64::from(n * (n + 1)) / 2.0;
         assert_eq!(f64::from(state.positions[0].y()), want, "step {n}");
         assert_eq!(state.positions[0].x(), 0.0);
@@ -172,7 +172,7 @@ fn a_pinned_particle_never_moves_under_integration() {
     let mut state = SimState::new(&sim);
     let data = ParticleData::new(&sim);
     for _ in 0..100 {
-        simulate::integrate(&mut state, &data.mass, &data.inv_mass, 1.0 / 30.0);
+        simulate::integrate(&mut state, &data.mass, &data.inv_mass, &[], 1.0 / 30.0);
     }
     assert_eq!(state.positions[0], v(1.0, 2.0, 3.0));
     assert_eq!(state.previous[0], v(1.0, 2.0, 3.0));
@@ -188,7 +188,7 @@ fn damping_scales_the_velocity_each_step() {
     state.damping = 0.5;
     let mut last = state.positions[0].x();
     for n in 1..=10 {
-        simulate::integrate(&mut state, &data.mass, &data.inv_mass, 0.1);
+        simulate::integrate(&mut state, &data.mass, &data.inv_mass, &[], 0.1);
         let x = state.positions[0].x();
         assert_eq!(f64::from(x - last), 0.5f64.powi(n), "step {n}");
         last = x;
@@ -873,6 +873,7 @@ fn a_pinned_particle_follows_its_animation_through_the_substeps() {
         &data,
         &[],
         &[],
+        &mut [],
         1.0 / 30.0,
     );
     assert_eq!(state.positions[0], v(3.0, 0.0, 0.0));
@@ -889,7 +890,7 @@ fn a_pendulum_keeps_its_length_and_swings_through_the_bottom() {
     let mut lowest = 0.0f32;
     for _ in 0..60 {
         simulate::prepare(&mut state, 1.0 / 60.0, cfg.sub_steps, StiffnessModel::Legacy);
-        simulate::simulate(&sim, &cfg, &mut state, &data, &[], &[], 1.0 / 60.0);
+        simulate::simulate(&sim, &cfg, &mut state, &data, &[], &[], &mut [], 1.0 / 60.0);
         assert!((dist(state.positions[0], state.positions[1]) - 1.0).abs() < 2e-3);
         lowest = lowest.min(state.positions[1].y());
     }
@@ -987,7 +988,7 @@ fn the_same_inputs_give_bit_identical_results() {
         for frame in 0..200 {
             let dt = if frame % 7 == 0 { 1.0 / 30.0 } else { 1.0 / 60.0 };
             simulate::prepare(&mut state, dt, cfg.sub_steps, StiffnessModel::Legacy);
-            simulate::simulate(&sim, &cfg, &mut state, &data, &[], &[], dt);
+            simulate::simulate(&sim, &cfg, &mut state, &data, &[], &[], &mut [], dt);
         }
         state
     };
@@ -1001,4 +1002,51 @@ fn the_same_inputs_give_bit_identical_results() {
     };
     assert_eq!(bits(&a), bits(&b));
     assert!(a.positions.iter().all(|p| p.is_finite()));
+}
+
+/// An action that pushes every particle along x with a constant force and counts its calls.
+struct Push {
+    force: f32,
+    calls: Vec<f32>,
+}
+
+impl simulate::Action for Push {
+    fn apply(&mut self, _state: &SimState, time_step: f32, forces: &mut [V4]) {
+        self.calls.push(time_step);
+        for f in forces.iter_mut() {
+            *f = f.add(V4::new(self.force, 0.0, 0.0, 0.0));
+        }
+    }
+}
+
+#[test]
+fn actions_add_their_forces_on_every_substep() {
+    // no gravity, unit mass, a force of 4 along x: each substep of 1/64 adds 4/4096 to the velocity, all exact
+    let mut sim = sim_cloth(&[v(0.0, 0.0, 0.0)], &[1.0], Vec::new());
+    sim.gravity = [0.0; 4];
+    let data = ParticleData::new(&sim);
+    let mut state = SimState::new(&sim);
+    state.damping = 1.0;
+    state.last_time_step = 1.0 / 64.0;
+    let mut push = Push {
+        force: 4.0,
+        calls: Vec::new(),
+    };
+    let cfg = config(2, Vec::new(), false);
+    for _ in 0..3 {
+        simulate::simulate(
+            &sim,
+            &cfg,
+            &mut state,
+            &data,
+            &[],
+            &[],
+            &mut [&mut push],
+            1.0 / 32.0,
+        );
+    }
+    // two substeps a frame, each 1/64 long
+    assert_eq!(push.calls, vec![1.0 / 64.0; 6]);
+    // after n substeps x = F dt^2 n(n+1)/2 with n = 6
+    assert_eq!(f64::from(state.positions[0].x()), 4.0 / 4096.0 * 21.0);
 }

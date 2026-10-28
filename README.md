@@ -18,10 +18,12 @@ the same inputs give the game's particle positions to the bit on the machine the
 - **Skinning and deformation**: the object-space and bone-space deformers that skin buffers and deform display
   meshes from the simulated mesh (triangle frames), with their packed and float vertex blocks.
 - **Vertex operators**: copies, gathers, moving pinned particles to their skinned vertices, and the update of
-  normals, tangents and bitangents.
+  normals, tangents and bitangents (all vertices or a selection).
+- **Bones driven by the cloth**: the mesh bone deformers that place bones on the simulated triangles.
+- **Cloth instances**: a cloth data's buffers and transform sets at run time, stepped one cloth state at a time, and
+  actions: forces the game adds on every substep.
 
-The cloth instance that runs a state's operators in order, bone-driving operators, conversions, volume constraints and
-virtual collision points are being added; see the changelog.
+Volume constraints, virtual collision points and landscape collision are being added; see the changelog.
 
 ## Example
 
@@ -43,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // the bone transforms that drive the collidables, world from bone, one a bone of the transform set
             let bones = [];
             simulate::prepare(&mut state, 1.0 / 60.0, configs[0].sub_steps, StiffnessModel::Legacy);
-            simulate::simulate(sim, &configs[0], &mut state, &particles, &[], &bones, 1.0 / 60.0);
+            simulate::simulate(sim, &configs[0], &mut state, &particles, &[], &bones, &mut [], 1.0 / 60.0);
         }
         println!("{}: {:?}", sim.name, &state.positions[..4]);
     }

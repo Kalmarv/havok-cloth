@@ -21,5 +21,13 @@ The first version: the simulate operator for one sim cloth, as Sekiro and Elden 
 - `operators`: copy, gather (all and some vertices), moving particles to their reference vertices, and the vertex
   frames update (normals, tangents, bitangents).
 - `buffer`: a buffer carries both of its matrices (`world_from_mesh` and `mesh_from_world`), as the game supplies them.
+- `instance`: `ClothInstance` runs one cloth data's states: every operator's notification, then the state's operators
+  in order, over its buffers (shadow buffers per state, particle buffers kept in step with their sim cloths) and
+  transform sets. Every cloth data of both installs instances and runs every state.
+- `deform`: the bone-space skin composite, and the bones the mesh bone deformers place on triangles (single and
+  weighted).
+- `operators`: the vertex frames update of a selection of vertices.
+- `simulate`: actions, the forces a game adds to a sim cloth on every substep (Sekiro adds one to its characters'
+  cloth at run time: the data holds none).
 - Tests: unit tests of every step against independent expectations, and every sim cloth of both installs simulated
   from its rest pose (`GAME_DATA`).

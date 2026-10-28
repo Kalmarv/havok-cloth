@@ -70,7 +70,16 @@ fn every_sim_cloth_of_both_installs_simulates_and_stays_finite() -> Result<(), B
                         .collect();
                     for _ in 0..60 {
                         simulate::prepare(&mut state, 1.0 / 60.0, config.sub_steps, model);
-                        simulate::simulate(sim, config, &mut state, &particles, &[], &[], 1.0 / 60.0);
+                        simulate::simulate(
+                            sim,
+                            config,
+                            &mut state,
+                            &particles,
+                            &[],
+                            &[],
+                            &mut [],
+                            1.0 / 60.0,
+                        );
                     }
                     assert!(
                         state.positions.iter().all(|p| p.is_finite3()),

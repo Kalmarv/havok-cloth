@@ -206,3 +206,115 @@ pub fn update_vertex_frames(f: &VertexFrames<'_>, buffer: &mut Buffer) {
         }
     }
 }
+
+/// What `hclUpdateSomeVertexFramesOperator` keeps: a selection of vertices and the triangles around them.
+#[derive(Clone, Copy, Debug)]
+pub struct SomeVertexFrames<'a> {
+    /// `involvedTriangles`: three indices into `involved_vertices` each.
+    pub involved_triangles: &'a [[u16; 3]],
+    /// `involvedVertices`: buffer vertex indices.
+    pub involved_vertices: &'a [u16],
+    /// `selectionVertexToInvolvedVertex`: the selected vertices, as indices into `involved_vertices`.
+    pub selection_to_involved: &'a [u16],
+    /// `involvedVertexToNormalID`.
+    pub involved_to_normal_id: &'a [u16],
+    /// `numUniqueNormalIDs`.
+    pub unique_normal_ids: usize,
+    /// `triangleFlips`: one bit per involved triangle, the most significant bit of a byte first.
+    pub triangle_flips: &'a [u8],
+    /// `referenceVertices`: per selected vertex, the buffer vertex its tangent edge points to.
+    pub reference_vertices: &'a [u16],
+    /// `tangentEdgeCosAngle`, per selected vertex.
+    pub tangent_edge_cos: &'a [f32],
+    /// `tangentEdgeSinAngle`, per selected vertex.
+    pub tangent_edge_sin: &'a [f32],
+    /// `biTangentFlip`, per selected vertex.
+    pub bitangent_flip: &'a [f32],
+    /// `updateNormals`.
+    pub normals: bool,
+    /// `updateTangents`.
+    pub tangents: bool,
+    /// `updateBiTangents`.
+    pub bitangents: bool,
+}
+
+/// `hclUpdateSomeVertexFramesOperator` on `buffer`: as [`update_vertex_frames`] over the involved triangles, writing
+/// only the selected vertices; every tangent edge is fast-normalised.
+pub fn update_some_vertex_frames(f: &SomeVertexFrames<'_>, buffer: &mut Buffer) {
+    let global = |involved: u16| {
+        f.involved_vertices
+            .get(usize::from(involved))
+            .map(|&g| usize::from(g))
+    };
+    if f.normals {
+        let mut shared = vec![V4::ZERO; f.unique_normal_ids];
+        for (t, tri) in f.involved_triangles.iter().enumerate() {
+            let (Some(a), Some(b), Some(c)) = (global(tri[0]), global(tri[1]), global(tri[2])) else {
+                continue;
+            };
+            let (Some(&pa), Some(&pb), Some(&pc)) = (
+                buffer.positions.get(a),
+                buffer.positions.get(b),
+                buffer.positions.get(c),
+            ) else {
+                continue;
+            };
+            let mut n = pb.sub(pa).cross(pc.sub(pa));
+            let byte = f.triangle_flips.get(t / 8).copied().unwrap_or(0);
+            let flip = f32::from((byte >> (7 - t % 8)) & 1);
+            n = n.mul(V4::splat(1.0 - flip * 2.0));
+            for &involved in tri {
+                if let Some(s) = f
+                    .involved_to_normal_id
+                    .get(usize::from(involved))
+                    .and_then(|&id| shared.get_mut(usize::from(id)))
+                {
+                    *s = s.add(n);
+                }
+            }
+        }
+        for s in &mut shared {
+            *s = s.normalized_fast();
+        }
+        for &involved in f.selection_to_involved {
+            if let (Some(g), Some(&n)) = (
+                global(involved),
+                f.involved_to_normal_id
+                    .get(usize::from(involved))
+                    .and_then(|&id| shared.get(usize::from(id))),
+            ) && let Some(slot) = buffer.normals.get_mut(g)
+            {
+                *slot = n;
+            }
+        }
+    }
+    if !f.tangents || buffer.tangents.is_empty() {
+        return;
+    }
+    let bitangents = f.bitangents && !buffer.bitangents.is_empty();
+    for (sel, &involved) in f.selection_to_involved.iter().enumerate() {
+        let Some(g) = global(involved) else { continue };
+        let (Some(&n), Some(&p), Some(&r)) = (
+            buffer.normals.get(g),
+            buffer.positions.get(g),
+            f.reference_vertices
+                .get(sel)
+                .and_then(|&r| buffer.positions.get(usize::from(r))),
+        ) else {
+            continue;
+        };
+        let e = r.sub(p);
+        let x = e.sub(n.scale(e.dot3(n))).normalized_fast();
+        let y = n.cross(x);
+        let (cos, sin) = (
+            f.tangent_edge_cos.get(sel).copied().unwrap_or(1.0),
+            f.tangent_edge_sin.get(sel).copied().unwrap_or(0.0),
+        );
+        let t = x.scale(cos).add(y.scale(sin));
+        buffer.tangents[g] = t;
+        if bitangents {
+            let flip = f.bitangent_flip.get(sel).copied().unwrap_or(1.0);
+            buffer.bitangents[g] = n.cross(t).scale(flip);
+        }
+    }
+}

@@ -109,21 +109,29 @@ pub fn prepare(state: &mut SimState, frame_dt: f32, sub_steps: u8, model: Stiffn
     state.damping = damping(state.global_damping_per_second, dt);
 }
 
-/// Verlet integration over `dt`: `next = (x + (x - prev)*damping) + ((gravity*mass) * invMass) * dt^2`, then
-/// `prev = x`, `x = next`, all four lanes.
-pub fn integrate(state: &mut SimState, mass: &[f32], inv_mass: &[f32], dt: f32) {
+/// A force a game adds to a sim cloth on every substep (a Havok action, such as wind): `apply` adds each particle's
+/// force to `forces` (which start at zero on every substep), before integration.
+pub trait Action {
+    /// Adds this substep's forces, `time_step` long, to `forces` (one per particle).
+    fn apply(&mut self, state: &SimState, time_step: f32, forces: &mut [V4]);
+}
+
+/// Verlet integration over `dt`: `next = (x + (x - prev)*damping) + (((force + gravity*mass) * invMass) * dt^2)`,
+/// then `prev = x`, `x = next`, all four lanes. `forces` holds the actions' forces of this substep (empty: none).
+pub fn integrate(state: &mut SimState, mass: &[f32], inv_mass: &[f32], forces: &[V4], dt: f32) {
     let dt2 = dt * dt;
     let k = state.damping;
     let g = state.gravity;
-    for (((cur, prev), &m), &im) in state
+    for (p, (((cur, prev), &m), &im)) in state
         .positions
         .iter_mut()
         .zip(state.previous.iter_mut())
         .zip(mass)
         .zip(inv_mass)
+        .enumerate()
     {
         // the force accumulator starts at +0 in every lane: + 0 turns a -0 product into +0
-        let force = V4::ZERO.add(g.scale(m));
+        let force = forces.get(p).copied().unwrap_or(V4::ZERO).add(g.scale(m));
         let step = force.scale(im).scale(dt2);
         let x = *cur;
         let next = x.add_scaled(x.sub(*prev), k).add(step);
@@ -300,7 +308,8 @@ pub fn drive_collidables(sim: &SimCloth, state: &mut SimState, bones: &[Mat4], t
 }
 
 /// One frame of the simulate operator for `sim`: `frame_dt` long, with `config` and its stiffness model. `bones` is
-/// the transform set that drives the collidables (when the sim cloth maps them to bones).
+/// the transform set that drives the collidables (when the sim cloth maps them to bones); `actions` add forces on
+/// every substep, in order.
 #[allow(
     clippy::too_many_arguments,
     reason = "the operator's data, the sim cloth's state and the frame's inputs"
@@ -312,6 +321,7 @@ pub fn simulate(
     data: &ParticleData,
     buffers: &[Buffer],
     bones: &[Mat4],
+    actions: &mut [&mut dyn Action],
     frame_dt: f32,
 ) {
     let model = if config.adapt_constraint_stiffness {
@@ -344,7 +354,14 @@ pub fn simulate(
             state.previous[f] = blended;
             state.positions[f] = blended;
         }
-        integrate(state, &data.mass, &data.inv_mass, sub);
+        let mut forces = Vec::new();
+        if !actions.is_empty() {
+            forces = vec![V4::ZERO; state.positions.len()];
+            for action in actions.iter_mut() {
+                action.apply(state, sub, &mut forces);
+            }
+        }
+        integrate(state, &data.mass, &data.inv_mass, &forces, sub);
         for _ in 0..config.solve_iterations {
             let collide_and_solve = |state: &mut SimState| collide::collide(sim, &runtime, state, data, sub);
             if config.constraint_execution.is_empty() {

@@ -6,8 +6,8 @@ use crate::buffer::Buffer;
 use crate::matrix::Mat4;
 use crate::simd::V4;
 use havok_formats::cloth::{
-    BoneSpaceDeformer, BoneSpaceLocalBlock, Components, ObjectSpaceDeformer, ObjectSpaceLocalBlock,
-    UnpackedLocalBlock,
+    BoneSpaceDeformer, BoneSpaceLocalBlock, Components, MeshBoneTriangle, ObjectSpaceDeformer,
+    ObjectSpaceLocalBlock, UnpackedLocalBlock,
 };
 
 /// An `hkPackedVector3` from its four stored words: each word is the high half of a 32-bit integer, converted to a
@@ -75,6 +75,21 @@ pub fn composite_matrices(
         .collect()
 }
 
+/// The matrix of each bone a bone-space deformer refers to: `mesh_from_world * bones[t]` (affine), where `t` runs
+/// through `subset` (all of `bones` in order when `subset` is empty). The bone-space skin operators pass the output
+/// buffer's `mesh_from_world` and the transform set; the bone-space mesh-mesh deforms pass the matrix from the input
+/// buffer's space to the output's and the triangle frames.
+pub fn bone_space_composite(mesh_from_world: &Mat4, bones: &[Mat4], subset: &[u16]) -> Vec<Mat4> {
+    if subset.is_empty() {
+        bones.iter().map(|b| mesh_from_world.mul_affine(b)).collect()
+    } else {
+        subset
+            .iter()
+            .map(|&t| mesh_from_world.mul_affine(bones.get(usize::from(t)).unwrap_or(&Mat4::IDENTITY)))
+            .collect()
+    }
+}
+
 /// How a mesh-mesh deform treats the length of a triangle frame's normal axis (`scaleNormalBehaviour`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NormalScale {
@@ -131,6 +146,80 @@ pub fn triangle_frames(positions: &[V4], triangles: &[u16], subset: &[u16], scal
         (0..triangles.len() / 3).map(frame).collect()
     } else {
         subset.iter().map(|&t| frame(usize::from(t))).collect()
+    }
+}
+
+/// A bone matrix made orthonormal as the bone deformers do it: `y = z x x`, then `x = y x z`, each axis fast-normalised
+/// (z first); the translation kept and the fourth row set to `(0, 0, 0, 1)`.
+fn orthonormal_bone(m: &Mat4) -> Mat4 {
+    let [x, _, z, position] = m.cols;
+    let y = z.cross(x);
+    let x = y.cross(z);
+    let (z, y, x) = (z.normalized_fast(), y.normalized_fast(), x.normalized_fast());
+    Mat4 {
+        cols: [x.with_w(0.0), y.with_w(0.0), z.with_w(0.0), position.with_w(1.0)],
+    }
+}
+
+/// `hclMeshBoneDeformOperator`: each bone with entries (`start_for_bone[b]..start_for_bone[b + 1]` of `pairs`) is the
+/// weighted sum, from zero, of its triangles' frames times their local bone transforms (affine products), each scaled
+/// by its weight, made orthonormal; bones without entries are left as they are.
+pub fn mesh_bone_deform(
+    positions: &[V4],
+    triangles: &[u16],
+    pairs: &[MeshBoneTriangle],
+    start_for_bone: &[u16],
+    bones: &mut [Mat4],
+) {
+    let frames = triangle_frames(positions, triangles, &[], NormalScale::Apply);
+    for (b, bone) in bones.iter_mut().enumerate() {
+        let (Some(&start), Some(&end)) = (start_for_bone.get(b), start_for_bone.get(b + 1)) else {
+            break;
+        };
+        let entries = pairs.get(usize::from(start)..usize::from(end)).unwrap_or(&[]);
+        if entries.is_empty() {
+            continue;
+        }
+        let mut blended = Mat4 { cols: [V4::ZERO; 4] };
+        for e in entries {
+            let frame = frames
+                .get(usize::from(e.triangle))
+                .copied()
+                .unwrap_or(Mat4::IDENTITY);
+            let m = frame
+                .mul_affine(&Mat4::from_columns(e.local_bone_transform))
+                .scale(e.weight);
+            blended = blended.add(&m);
+        }
+        *bone = orthonormal_bone(&blended);
+    }
+}
+
+/// `hclSimpleMeshBoneDeformOperator`: bones placed on triangles of a buffer. For each `(bone byte offset, triangle
+/// byte offset)` pair, the triangle's frame (normal axis as the cross product) times the bone's local transform (the
+/// full product), made orthonormal: `y = z x x`, then `x = y x z`, each axis fast-normalised; the translation kept and
+/// the fourth row set to `(0, 0, 0, 1)`. Offsets are in bytes, as stored: 64 a bone, 2 a triangle index.
+pub fn simple_mesh_bone_deform(
+    positions: &[V4],
+    triangles: &[u16],
+    pairs: &[(u16, u16)],
+    local_bone_transforms: &[[f32; 16]],
+    bones: &mut [Mat4],
+) {
+    for (&(bone_offset, triangle_offset), local) in pairs.iter().zip(local_bone_transforms) {
+        let t = usize::from(triangle_offset) / 2;
+        let v = |k: usize| {
+            triangles
+                .get(t + k)
+                .and_then(|&i| positions.get(usize::from(i)))
+                .copied()
+                .unwrap_or(V4::ZERO)
+        };
+        let frame = triangle_frame(v(0), v(1), v(2), NormalScale::Apply);
+        let m = frame.mul(&Mat4::from_columns(*local));
+        if let Some(bone) = bones.get_mut(usize::from(bone_offset) / 64) {
+            *bone = orthonormal_bone(&m);
+        }
     }
 }
 

@@ -287,3 +287,110 @@ fn moved_particles_keep_or_lose_their_velocity() {
     operators::move_particles(&reference, &[(0, 0)], &mut pos, &mut prev, false);
     assert_eq!(prev[0], pos[0]);
 }
+
+#[test]
+fn a_bone_on_a_triangle_sits_at_its_centroid_with_orthogonal_axes() {
+    let p = [
+        V4::new(3.0, 0.0, 0.0, 1.0),
+        V4::new(0.0, 3.0, 0.0, 1.0),
+        V4::new(0.0, 0.0, 0.0, 1.0),
+    ];
+    let mut bones = vec![Mat4::IDENTITY; 3];
+    // bone 2 (byte offset 128) on triangle 0 (byte offset 0), local transform the identity
+    deform::simple_mesh_bone_deform(
+        &p,
+        &[0, 1, 2],
+        &[(128, 0)],
+        &[Mat4::IDENTITY.to_columns()],
+        &mut bones,
+    );
+    assert_eq!(bones[0], Mat4::IDENTITY, "other bones untouched");
+    let b = bones[2];
+    let c = 3.0f32 * (1.0 / 3.0);
+    assert_eq!(b.cols[3], V4::new(c, c, 0.0, 1.0));
+    for k in 0..3 {
+        assert_eq!(b.cols[k].w(), 0.0);
+        assert!(
+            (b.cols[k].length3() - 1.0).abs() < 1e-3,
+            "axis {k} unit to the estimate's accuracy"
+        );
+    }
+    assert!(b.cols[0].dot3(b.cols[1]).abs() < 1e-3 && b.cols[1].dot3(b.cols[2]).abs() < 1e-3);
+    // z is the triangle's normal (counter-clockwise a, b around the centroid: +z)
+    assert!(b.cols[2].z() > 0.99);
+}
+
+#[test]
+fn a_single_full_weight_triangle_drives_a_bone_as_the_simple_deform_does() {
+    let p = [
+        V4::new(1.0, 0.5, 0.0, 1.0),
+        V4::new(-0.25, 2.0, 0.5, 1.0),
+        V4::new(0.0, 0.0, 1.0, 1.0),
+    ];
+    let mut local = Mat4::IDENTITY;
+    local.cols[3] = V4::new(0.5, 0.25, -1.0, 1.0);
+    let mut simple = vec![Mat4::IDENTITY; 1];
+    deform::simple_mesh_bone_deform(&p, &[0, 1, 2], &[(0, 0)], &[local.to_columns()], &mut simple);
+    let mut weighted = vec![Mat4::IDENTITY; 1];
+    let pairs = [havok_formats::cloth::MeshBoneTriangle {
+        local_bone_transform: local.to_columns(),
+        weight: 1.0,
+        triangle: 0,
+    }];
+    deform::mesh_bone_deform(&p, &[0, 1, 2], &pairs, &[0, 1], &mut weighted);
+    // the full product and the affine product agree on affine matrices, and a weight of 1 changes nothing
+    assert_eq!(weighted, simple);
+}
+
+#[test]
+fn updating_some_frames_with_everything_selected_matches_updating_all() {
+    use havok_cloth::operators::{SomeVertexFrames, VertexFrames};
+    let mut a = Buffer::new(4);
+    a.positions = vec![
+        V4::new(0.0, 0.0, 0.0, 1.0),
+        V4::new(1.0, 0.0, 0.25, 1.0),
+        V4::new(0.0, 1.0, -0.5, 1.0),
+        V4::new(1.0, 1.0, 0.0, 1.0),
+    ];
+    let mut b = a.clone();
+    let tris = [0u16, 1, 2, 2, 1, 3];
+    let ids = [0u16, 1, 2, 3];
+    let flips = [0b0100_0000u8];
+    operators::update_vertex_frames(
+        &VertexFrames {
+            triangles: &tris,
+            vertex_to_normal_id: &ids,
+            unique_normal_ids: 4,
+            triangle_flips: &flips,
+            reference_vertices: &[],
+            tangent_edge_cos: &[],
+            tangent_edge_sin: &[],
+            bitangent_flip: &[],
+            normals: true,
+            tangents: false,
+            bitangents: false,
+        },
+        &mut a,
+    );
+    operators::update_some_vertex_frames(
+        &SomeVertexFrames {
+            involved_triangles: &[[0, 1, 2], [2, 1, 3]],
+            involved_vertices: &[0, 1, 2, 3],
+            selection_to_involved: &[0, 1, 2, 3],
+            involved_to_normal_id: &ids,
+            unique_normal_ids: 4,
+            triangle_flips: &flips,
+            reference_vertices: &[],
+            tangent_edge_cos: &[],
+            tangent_edge_sin: &[],
+            bitangent_flip: &[],
+            normals: true,
+            tangents: false,
+            bitangents: false,
+        },
+        &mut b,
+    );
+    assert_eq!(a.normals, b.normals);
+    // the second triangle is flipped: vertex 3 (only in it) points down
+    assert!(a.normals[3].z() < 0.0);
+}

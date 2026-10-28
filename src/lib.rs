@@ -11,6 +11,7 @@ pub mod buffer;
 pub mod collide;
 pub mod constraints;
 pub mod deform;
+pub mod instance;
 pub mod matrix;
 pub mod operators;
 pub mod simd;
