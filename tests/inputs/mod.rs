@@ -16,6 +16,10 @@ primase_testdata::inputs! {
             about: "the games' own files cut from their installs (here: Havok tagfiles with cloth)",
             source: "the user's own installs: files extracted as stored",
         },
+        Capture = "capture" {
+            about: "cloth steps recorded from the running games, each operator's inputs and outputs",
+            source: "a recorder loaded into the user's own game, offline, that reads the cloth instance's memory around each call of the cloth operators and changes nothing",
+        },
     }
     declared {
         Query::Oracle(OracleSet::Corpus, Game::Sekiro, "havok-cloth") => {
@@ -29,6 +33,12 @@ primase_testdata::inputs! {
             gate: false,
             about: r#"every distinct tagfile with cloth of the install: 814 files, loose, and `manifest.tsv` naming each of the 1,605 binder members they were found in; tests/real_data.rs simulates every sim cloth of them"#,
             source: r#"the game's own files from the user's install, found as for Sekiro"#,
+        },
+        Query::Oracle(OracleSet::Capture, Game::Sekiro, "havok-cloth") => {
+            status: Live,
+            gate: false,
+            about: r#"cloth steps of the player's scarf and robes, recorded from the running game: `captures.tsv` (frames file, tagfile of the Sekiro havok-cloth corpus, cloth data, processor) and one `CLF3` frames file per capture (layout in tests/game_capture.rs); tests/game_capture.rs replays them"#,
+            source: r#"the recorder's capture of the game in play, cut to one cloth data's steps"#,
         },
     }
     debug {}
