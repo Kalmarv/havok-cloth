@@ -153,10 +153,11 @@ impl Quat {
     }
 }
 
-/// The four-lane dot product as the SSE2 build sums it: `(x + y) + (z + w)` of the products.
+/// The four-lane dot product as the games' SSE2 code sums it, by two shuffled adds (lanes swapped in pairs, then
+/// neighbours): `(x + z) + (y + w)` of the products.
 pub fn dot4(a: V4, b: V4) -> f32 {
     let p = a.mul(b).0;
-    (p[0] + p[1]) + (p[2] + p[3])
+    (p[0] + p[2]) + (p[1] + p[3])
 }
 
 /// A matrix whose rotation columns are `r` and whose translation is `t`.
@@ -989,6 +990,15 @@ mod tests {
         assert_eq!(asin(5e-5), 5e-5);
         assert_eq!(asin(-0.3), -asin(0.3));
         assert_eq!(asin(2.0), asin(1.0));
+    }
+
+    #[test]
+    fn dot4_adds_x_to_z_and_y_to_w_first() {
+        // the products are 1, 2^-24, 0 and 2^-24: (1 + 0) + (2^-24 + 2^-24) = 1 + 2^-23 is representable, where
+        // (1 + 2^-24) + (0 + 2^-24) rounds 1 + 2^-24 to 1 (ties to even) and then 1 + 2^-24 to 1 again
+        let tiny = 2f32.powi(-12);
+        let a = V4::new(1.0, tiny, 0.0, tiny);
+        assert_eq!(dot4(a, a), 1.0 + 2f32.powi(-23));
     }
 
     #[test]

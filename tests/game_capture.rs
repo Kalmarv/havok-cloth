@@ -435,8 +435,9 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
 /// collidables after the step. Compared only on the processor the capture was made on (the approximate reciprocals
 /// differ between processors).
 #[test]
-#[ignore = "not yet bit for bit: on the first Sekiro capture the collidables' drive differs in the last bits in 101 \
-            of 299 steps, and the positions have not been compared with the action forces played back"]
+#[ignore = "not yet shown bit for bit: the collidables' drive differed in the last bits in 101 of 299 steps of the \
+            first Sekiro capture while the four-lane dot summed in another order than the game's, and the positions \
+            have not been compared with the action forces played back"]
 fn the_simulate_step_matches_the_game_bit_for_bit() {
     for capture in captures(Game::Sekiro) {
         if std::env::var("PROCESSOR_IDENTIFIER").ok().as_deref() != Some(capture.processor.as_str()) {
