@@ -51,7 +51,8 @@ pub struct ClothInstance<D: Deref<Target = Cloth> + Clone> {
     /// instance copies in before and back after each operator.
     pub buffers: Vec<Buffer>,
     /// Each buffer's triangles (three vertex indices each): the definition's, a sim cloth's for its particle buffers,
-    /// and whatever the caller sets for its display buffers.
+    /// and whatever the caller sets for its display buffers. An operator reads those of the buffer it names, also where
+    /// the state holds that buffer's vertices in a shadow buffer ([`ClothInstance::resolve`]).
     pub triangles: Vec<Vec<u16>>,
     /// The sim cloths' states, by sim cloth.
     pub sims: Vec<SimState>,
@@ -123,8 +124,9 @@ impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
         &self.data
     }
 
-    /// The buffer an operator of the current state reads or writes for buffer `index`: its shadow buffer when the
-    /// state gives it one.
+    /// The buffer an operator of the current state reads or writes the vertices of for buffer `index`: its shadow buffer
+    /// when the state gives it one. The triangles stay the named buffer's ([`triangles_of`]): in both games' files a
+    /// shadowed display buffer and its shadow state none, and the caller sets the drawn mesh's on the display buffer.
     fn resolve(&self, index: u32) -> usize {
         let i = index as usize;
         self.data
@@ -353,7 +355,7 @@ impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
                         .clone();
                     let frames = deform::triangle_frames(
                         &input.positions,
-                        &self.triangles[i],
+                        triangles_of(&self.triangles, *input_buffer),
                         input_triangles_subset,
                         NormalScale::from_stored(*scale_normal_behaviour),
                     );
@@ -390,7 +392,7 @@ impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
                         .clone();
                     let frames = deform::triangle_frames(
                         &input.positions,
-                        &self.triangles[i],
+                        triangles_of(&self.triangles, *input_buffer),
                         input_triangles_subset,
                         NormalScale::from_stored(*scale_normal_behaviour),
                     );
@@ -416,7 +418,7 @@ impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
                 } => {
                     let i = self.resolve(*input_buffer);
                     let input = self.buffers.get(i).ok_or_else(|| missing_buffer(*input_buffer))?;
-                    let tris = &self.triangles[i];
+                    let tris = triangles_of(&self.triangles, *input_buffer);
                     let bones = self
                         .transform_sets
                         .get_mut(*output_transform_set as usize)
@@ -437,7 +439,7 @@ impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
                 } => {
                     let i = self.resolve(*input_buffer);
                     let input = self.buffers.get(i).ok_or_else(|| missing_buffer(*input_buffer))?;
-                    let tris = &self.triangles[i];
+                    let tris = triangles_of(&self.triangles, *input_buffer);
                     let bones = self
                         .transform_sets
                         .get_mut(*output_transform_set as usize)
@@ -567,7 +569,7 @@ impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
                 } => {
                     let b = self.resolve(*buffer);
                     let frames = VertexFrames {
-                        triangles: &self.triangles[b],
+                        triangles: triangles_of(&self.triangles, *buffer),
                         vertex_to_normal_id,
                         unique_normal_ids: *unique_normal_ids as usize,
                         triangle_flips,
@@ -666,6 +668,11 @@ pub fn driven_bones(data: &Cloth) -> BTreeSet<(u32, usize)> {
 }
 
 /// Copies every component `from` has into `to`, vertex by vertex, as far as both reach.
+/// The triangles of buffer `index` as an operator names it: none for an index past the buffers.
+fn triangles_of(triangles: &[Vec<u16>], index: u32) -> &[u16] {
+    triangles.get(index as usize).map_or(&[], Vec::as_slice)
+}
+
 fn copy_components(from: &Buffer, to: &mut Buffer) {
     for (src, dst) in [
         (&from.positions, &mut to.positions),
@@ -735,6 +742,98 @@ mod tests {
         ]);
         let want: BTreeSet<(u32, usize)> = [(0, 1), (0, 3), (1, 0), (1, 2)].into_iter().collect();
         assert_eq!(driven_bones(&data), want);
+    }
+
+    /// A buffer definition of `vertices` vertices of class `kind`.
+    fn buffer(buffer_type: i32, vertices: u32, kind: BufferKind) -> havok_formats::cloth::BufferDefinition {
+        use havok_formats::cloth::{BufferElement, BufferLayout, BufferSlot};
+        let element = BufferElement {
+            vector_conversion: 0,
+            vector_size: 0,
+            slot: 0,
+            slot_start: 0,
+        };
+        havok_formats::cloth::BufferDefinition {
+            name: String::new(),
+            buffer_type,
+            sub_type: 0,
+            vertices,
+            triangles: 0,
+            layout: BufferLayout {
+                elements: [element; 4],
+                slots: [BufferSlot { flags: 0, stride: 0 }; 4],
+                num_slots: 0,
+                triangle_format: 0,
+            },
+            kind,
+        }
+    }
+
+    /// Sekiro's scarf: its display buffer (an `hclBufferDefinition` of type 4) is shadowed in its state by an
+    /// `hclShadowBufferDefinition` (type 7), neither stating triangles; the state's `hclUpdateAllVertexFramesOperator`
+    /// names the display buffer, whose triangles are the drawn mesh's, set by the caller. The normals it writes into the
+    /// shadow are those of the mesh's triangles.
+    #[test]
+    fn vertex_frames_of_a_shadowed_buffer_use_the_triangles_of_the_buffer_they_name() {
+        use havok_formats::cloth::{BufferAccess, BufferUsage, ClothState};
+        let mut data = cloth(vec![operator(OperatorKind::UpdateAllVertexFrames {
+            vertex_to_normal_id: vec![0, 1, 2],
+            triangle_flips: vec![0],
+            reference_vertices: Vec::new(),
+            tangent_edge_cos: Vec::new(),
+            tangent_edge_sin: Vec::new(),
+            bitangent_flip: Vec::new(),
+            buffer: 0,
+            unique_normal_ids: 3,
+            update_normals: true,
+            update_tangents: false,
+            update_bitangents: false,
+        })]);
+        data.buffers = vec![
+            buffer(4, 3, BufferKind::Plain),
+            buffer(
+                7,
+                3,
+                BufferKind::Shadow {
+                    triangle_indices: Vec::new(),
+                    positions: true,
+                    normals: true,
+                    tangents: false,
+                    bitangents: false,
+                },
+            ),
+        ];
+        data.states = vec![ClothState {
+            name: String::new(),
+            operators: vec![0],
+            used_buffers: vec![BufferAccess {
+                buffer: 0,
+                usage: BufferUsage {
+                    per_component_flags: [1, 2, 0, 0],
+                    triangles_read: true,
+                },
+                shadow_buffer: 1,
+            }],
+            used_transform_sets: Vec::new(),
+            used_sim_cloths: Vec::new(),
+            dependency_graph: None,
+        }];
+        let mut instance = ClothInstance::new(&data).expect("nothing to refuse");
+        // the drawn mesh: a triangle in the plane z = 0, wound towards +z, its vertices held in the shadow
+        instance.triangles[0] = vec![0, 1, 2];
+        instance.buffers[1].positions = vec![
+            V4([0.0, 0.0, 0.0, 1.0]),
+            V4([1.0, 0.0, 0.0, 1.0]),
+            V4([0.0, 1.0, 0.0, 1.0]),
+        ];
+        instance.step(1.0 / 30.0, &mut []).expect("nothing to refuse");
+        for (v, n) in instance.buffers[1].normals.iter().enumerate() {
+            let [x, y, z, _] = n.0;
+            assert!(
+                x == 0.0 && y == 0.0 && (z - 1.0).abs() < 1e-3,
+                "vertex {v}: normal {n:?}"
+            );
+        }
     }
 
     #[test]

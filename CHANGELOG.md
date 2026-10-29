@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `instance`: an operator reads the triangles of the buffer it names, also where the state holds that buffer's
+  vertices in a shadow buffer. A shadowed display buffer's vertex frames (`hclUpdateAllVertexFramesOperator`) were
+  computed over the shadow's triangles, which neither game states, so every normal of a shadowed display buffer was
+  zero (Sekiro's scarf and robes among them: 484 such operators in Sekiro, 2,533 in Elden Ring).
+
 ## 0.2.0 (2026-10-29)
 
 - `simulate`: the stiffness model is the sim instance's (`SimState::stiffness_model`, legacy by default, as the game
