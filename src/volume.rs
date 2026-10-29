@@ -270,20 +270,26 @@ pub fn apply(
         .eigenvectors
         .mul(&Mat3::diagonal(root).mul(&state.eigenvectors.transpose()));
     state.rotation = a.mul(&s.inverse_symmetric());
-    let target = |f: [f32; 4]| state.rotation.rotate(V4(f)).add(state.translation);
+    let [c0, c1, c2] = state.rotation.cols;
+    let t = state.translation;
     for b in apply_batches {
         for i in 0..16 {
             let p = usize::from(b.particles[i]);
             let Some(&x) = positions.get(p) else { continue };
+            // a batch's target adds the centre after the first column: `((c0*x + t) + c1*y) + c2*z`
+            let f = V4(b.frame_vectors[i]);
+            let target = c0.scale(f.x()).add(t).add_scaled(c1, f.y()).add_scaled(c2, f.z());
             let k = b.stiffnesses[i] * stiffness;
-            positions[p] = x.add(target(b.frame_vectors[i]).sub(x).scale(k));
+            positions[p] = x.add(target.sub(x).scale(k));
         }
     }
     for s in apply_singles {
         let p = usize::from(s.particle);
         let Some(&x) = positions.get(p) else { continue };
+        // a single's target is the frame's transform of the point: `((c0*x + c1*y) + c2*z) + t`
+        let target = state.rotation.rotate(V4(s.frame_vector)).add(t);
         let k = s.stiffness * stiffness;
-        positions[p] = x.add(target(s.frame_vector).sub(x).scale(k));
+        positions[p] = x.add(target.sub(x).scale(k));
     }
 }
 
