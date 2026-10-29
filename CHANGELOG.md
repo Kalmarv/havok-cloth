@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-29)
 
 - `simulate`: the stiffness model is the sim instance's (`SimState::stiffness_model`, legacy by default, as the game
   creates its instances), no longer chosen by a configuration's `adaptConstraintStiffness`, which now only lets the
