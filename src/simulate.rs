@@ -8,12 +8,17 @@ use crate::simd::V4;
 use crate::volume::{self, VolumeState};
 use havok_formats::cloth::{ConstraintKind, ConstraintSet, SimCloth, SimulateConfig};
 
-/// How a constraint set's stiffness is scaled for a substep.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How a sim cloth instance scales its constraint sets' stiffness for a substep: a setting of the instance, not of the
+/// cloth data. The game creates every sim instance with [`StiffnessModel::Legacy`] (Sekiro never changes it); a
+/// simulate configuration's `adaptConstraintStiffness` does not choose the model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StiffnessModel {
-    /// Every set at full stiffness on every substep.
+    /// Every set at full stiffness on every substep, and the frame's substep length not slowed by the slow motion
+    /// factor.
+    #[default]
     Legacy,
-    /// Scaled by the number of substeps (`adaptConstraintStiffness`).
+    /// Scaled by the number of substeps and the slow motion and world stepping factors ([`set_stiffness`]), and the
+    /// substep length slowed by the slow motion factor.
     Adaptive,
 }
 
@@ -38,6 +43,8 @@ pub struct SimState {
     pub slow_motion: f32,
     /// The world stepping factor (1: one step a frame).
     pub world_stepping: f32,
+    /// How the instance scales its constraint sets' stiffness.
+    pub stiffness_model: StiffnessModel,
     /// Per constraint set, the transition state of a transition set.
     pub transitions: Vec<Option<Transition>>,
     /// Per constraint set, the state of a volume set (its last frame and eigenvectors).
@@ -68,6 +75,7 @@ impl SimState {
             global_damping_per_second: sim.global_damping_per_second,
             slow_motion: 1.0,
             world_stepping: 1.0,
+            stiffness_model: StiffnessModel::default(),
             transitions: sim
                 .constraint_sets
                 .iter()
@@ -100,10 +108,10 @@ pub fn damping(per_second: f32, dt: f32) -> f32 {
 }
 
 /// What happens before the operators run each frame: the substep length for a frame of `frame_dt` with `sub_steps`
-/// substeps; a change of length rescales every particle's previous position so its velocity is kept, and the damping
-/// is recomputed.
-pub fn prepare(state: &mut SimState, frame_dt: f32, sub_steps: u8, model: StiffnessModel) {
-    let slow = match model {
+/// substeps (slowed by the slow motion factor under the [`StiffnessModel::Adaptive`] model); a change of length
+/// rescales every particle's previous position so its velocity is kept, and the damping is recomputed.
+pub fn prepare(state: &mut SimState, frame_dt: f32, sub_steps: u8) {
+    let slow = match state.stiffness_model {
         StiffnessModel::Legacy => 1.0,
         StiffnessModel::Adaptive => state.slow_motion,
     };
@@ -152,11 +160,12 @@ pub fn integrate(state: &mut SimState, mass: &[f32], inv_mass: &[f32], forces: &
     }
 }
 
-/// The stiffness of constraint set `set` on substep `i` of `n`: under the adaptive model with more than one substep
-/// (or a slow motion or stepping factor), local range sets act only on the last substep, transition sets ramp with
-/// the substep, and the rest are softened by `powf(n * slowMotion * worldStepping, -1.725)`.
-pub fn set_stiffness(state: &SimState, model: StiffnessModel, set: &ConstraintSet, i: u32, n: u32) -> f32 {
-    if model == StiffnessModel::Legacy || (n == 1 && state.slow_motion == 1.0 && state.world_stepping == 1.0)
+/// The stiffness of constraint set `set` on substep `i` of `n`: under the instance's adaptive model with more than one
+/// substep (or a slow motion or stepping factor), local range sets act only on the last substep, transition sets ramp
+/// with the substep, and the rest are softened by `powf(n * slowMotion * worldStepping, -1.725)`; 1 otherwise.
+pub fn set_stiffness(state: &SimState, set: &ConstraintSet, i: u32, n: u32) -> f32 {
+    if state.stiffness_model == StiffnessModel::Legacy
+        || (n == 1 && state.slow_motion == 1.0 && state.world_stepping == 1.0)
     {
         return 1.0;
     }
@@ -338,9 +347,9 @@ pub fn drive_collidables(sim: &SimCloth, state: &mut SimState, bones: &[Mat4], t
     }
 }
 
-/// One frame of the simulate operator for `sim`: `frame_dt` long, with `config` and its stiffness model. `bones` is
-/// the transform set that drives the collidables (when the sim cloth maps them to bones); `actions` add forces on
-/// every substep, in order.
+/// One frame of the simulate operator for `sim`: `frame_dt` long, with `config`, under the instance's stiffness model.
+/// `bones` is the transform set that drives the collidables (when the sim cloth maps them to bones); `actions` add
+/// forces on every substep, in order.
 #[allow(
     clippy::too_many_arguments,
     reason = "the operator's data, the sim cloth's state and the frame's inputs"
@@ -355,16 +364,14 @@ pub fn simulate(
     actions: &mut [&mut dyn Action],
     frame_dt: f32,
 ) {
-    let model = if config.adapt_constraint_stiffness {
-        StiffnessModel::Adaptive
-    } else {
-        StiffnessModel::Legacy
-    };
     let n = u32::from(config.sub_steps.max(1));
     let time_step = frame_dt / state.slow_motion;
     // the substep: the frame's time step times the reciprocal of the substep count (not divided by it)
     let sub = time_step * (1.0 / n as f32);
-    let preserve_velocity = model == StiffnessModel::Adaptive
+    // the sets keep the particles' velocity where the instance adapts the stiffness or the configuration asks for it,
+    // and the frame is not one plain step
+    let preserve_velocity = (state.stiffness_model == StiffnessModel::Adaptive
+        || config.adapt_constraint_stiffness)
         && (n != 1 || state.slow_motion != 1.0 || state.world_stepping != 1.0);
     drive_collidables(sim, state, bones, time_step);
     let mut runtime = state.collidables.clone();
@@ -398,7 +405,7 @@ pub fn simulate(
             let collide_and_solve = |state: &mut SimState| collide::collide(sim, &runtime, state, data, sub);
             if config.constraint_execution.is_empty() {
                 for set in 0..sim.constraint_sets.len() {
-                    let s = set_stiffness(state, model, &sim.constraint_sets[set], i, n);
+                    let s = set_stiffness(state, &sim.constraint_sets[set], i, n);
                     apply_set(sim, set, state, data, buffers, s, preserve_velocity);
                 }
                 collide_and_solve(state);
@@ -409,7 +416,7 @@ pub fn simulate(
                             let Some(constraint) = sim.constraint_sets.get(set) else {
                                 continue;
                             };
-                            let s = set_stiffness(state, model, constraint, i, n);
+                            let s = set_stiffness(state, constraint, i, n);
                             apply_set(sim, set, state, data, buffers, s, preserve_velocity);
                         }
                         Err(_) => collide_and_solve(state),

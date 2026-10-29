@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `simulate`: the stiffness model is the sim instance's (`SimState::stiffness_model`, legacy by default, as the game
+  creates its instances), no longer chosen by a configuration's `adaptConstraintStiffness`, which now only lets the
+  constraint sets keep the particles' velocity over substeps; `prepare` and `set_stiffness` read it from the state
+  (breaking: their model argument is gone). Every set of a cloth whose configuration adapts its stiffness ran
+  softened over substeps where the game runs it at full stiffness.
+- `simulate`: the substep is the time step times the reciprocal of the substep count, as the game computes it (it
+  differed in the last bit for three substeps).
+- `volume`: a batch's target adds the frame's centre after its first column, as the game does (the moved particles
+  differed in the last bit).
+
 ## 0.1.0 (2026-10-29)
 
 The first version: the simulate operator for one sim cloth, as Sekiro and Elden Ring run it.

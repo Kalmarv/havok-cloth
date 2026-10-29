@@ -10,7 +10,7 @@ use crate::deform::{self, BoneSpaceLocal, LocalBlocks, NormalScale};
 use crate::matrix::Mat4;
 use crate::operators::{self, SomeVertexFrames, VertexFrames};
 use crate::simd::V4;
-use crate::simulate::{self, Action, ParticleData, SimState, StiffnessModel};
+use crate::simulate::{self, Action, ParticleData, SimState};
 use havok_formats::cloth::{BufferKind, Cloth, OperatorKind};
 
 /// Buffer types (`hclBufferDefinition::type`) whose buffers are a sim cloth's particles.
@@ -199,12 +199,7 @@ impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
                 && let OperatorKind::Simulate { sim_cloth, configs } = &op.kind
                 && let (Some(sim), Some(config)) = (self.sims.get_mut(*sim_cloth as usize), configs.first())
             {
-                let model = if config.adapt_constraint_stiffness {
-                    StiffnessModel::Adaptive
-                } else {
-                    StiffnessModel::Legacy
-                };
-                simulate::prepare(sim, dt, config.sub_steps, model);
+                simulate::prepare(sim, dt, config.sub_steps);
             }
         }
         for &opi in &state.operators {

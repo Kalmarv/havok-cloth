@@ -208,14 +208,14 @@ fn the_damping_factor_is_none_full_or_a_power() {
 fn a_new_timestep_keeps_the_velocity_per_second() {
     let sim = sim_cloth(&[v(0.0, 0.0, 0.0)], &[1.0], Vec::new());
     let mut state = SimState::new(&sim);
-    simulate::prepare(&mut state, 1.0 / 30.0, 1, StiffnessModel::Legacy);
+    simulate::prepare(&mut state, 1.0 / 30.0, 1);
     assert_eq!(state.last_time_step, 1.0 / 30.0);
     state.previous[0] = v(-0.1, 0.0, 0.0); // 0.1 per 1/30 s = 3 units per second
-    simulate::prepare(&mut state, 1.0 / 60.0, 1, StiffnessModel::Legacy);
+    simulate::prepare(&mut state, 1.0 / 60.0, 1);
     let per_step = f64::from(state.positions[0].x() - state.previous[0].x());
     assert!((per_step - 0.05).abs() < 1e-8, "{per_step}");
     // substeps divide the frame
-    simulate::prepare(&mut state, 1.0 / 30.0, 2, StiffnessModel::Legacy);
+    simulate::prepare(&mut state, 1.0 / 30.0, 2);
     assert_eq!(state.last_time_step, 1.0 / 60.0);
 }
 
@@ -889,7 +889,7 @@ fn a_pendulum_keeps_its_length_and_swings_through_the_bottom() {
     let cfg = config(1, vec![0, -1], false);
     let mut lowest = 0.0f32;
     for _ in 0..60 {
-        simulate::prepare(&mut state, 1.0 / 60.0, cfg.sub_steps, StiffnessModel::Legacy);
+        simulate::prepare(&mut state, 1.0 / 60.0, cfg.sub_steps);
         simulate::simulate(&sim, &cfg, &mut state, &data, &[], &[], &mut [], 1.0 / 60.0);
         assert!((dist(state.positions[0], state.positions[1]) - 1.0).abs() < 2e-3);
         lowest = lowest.min(state.positions[1].y());
@@ -902,7 +902,7 @@ fn a_pendulum_keeps_its_length_and_swings_through_the_bottom() {
 #[test]
 fn adaptive_stiffness_softens_links_by_the_substep_count_and_ramps_transitions() {
     let sim = sim_cloth(&[v(0.0, 0.0, 0.0)], &[1.0], Vec::new());
-    let state = SimState::new(&sim);
+    let mut state = SimState::new(&sim);
     let set = |kind| ConstraintSet {
         name: String::new(),
         constraint_id: None,
@@ -916,30 +916,15 @@ fn adaptive_stiffness_softens_links_by_the_substep_count_and_ramps_transitions()
         apply_normal_component: false,
         constraints: Vec::new(),
     });
-    assert_eq!(
-        simulate::set_stiffness(&state, StiffnessModel::Legacy, &links, 0, 3),
-        1.0
-    );
-    assert_eq!(
-        simulate::set_stiffness(&state, StiffnessModel::Adaptive, &links, 0, 1),
-        1.0
-    );
-    let s = f64::from(simulate::set_stiffness(
-        &state,
-        StiffnessModel::Adaptive,
-        &links,
-        1,
-        3,
-    ));
+    // an instance starts with the legacy model, as the game creates them: full stiffness on every substep
+    assert_eq!(state.stiffness_model, StiffnessModel::Legacy);
+    assert_eq!(simulate::set_stiffness(&state, &links, 0, 3), 1.0);
+    state.stiffness_model = StiffnessModel::Adaptive;
+    assert_eq!(simulate::set_stiffness(&state, &links, 0, 1), 1.0);
+    let s = f64::from(simulate::set_stiffness(&state, &links, 1, 3));
     assert!((s - 3f64.powf(-1.725)).abs() < 1e-6);
-    assert_eq!(
-        simulate::set_stiffness(&state, StiffnessModel::Adaptive, &range, 1, 3),
-        0.0
-    );
-    assert_eq!(
-        simulate::set_stiffness(&state, StiffnessModel::Adaptive, &range, 2, 3),
-        1.0
-    );
+    assert_eq!(simulate::set_stiffness(&state, &range, 1, 3), 0.0);
+    assert_eq!(simulate::set_stiffness(&state, &range, 2, 3), 1.0);
 }
 
 #[test]
@@ -987,7 +972,7 @@ fn the_same_inputs_give_bit_identical_results() {
         let cfg = config(2, vec![0, 1, -1], true);
         for frame in 0..200 {
             let dt = if frame % 7 == 0 { 1.0 / 30.0 } else { 1.0 / 60.0 };
-            simulate::prepare(&mut state, dt, cfg.sub_steps, StiffnessModel::Legacy);
+            simulate::prepare(&mut state, dt, cfg.sub_steps);
             simulate::simulate(&sim, &cfg, &mut state, &data, &[], &[], &mut [], dt);
         }
         state

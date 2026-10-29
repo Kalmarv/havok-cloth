@@ -13,7 +13,7 @@
 )]
 mod inputs;
 
-use havok_cloth::simulate::{self, ParticleData, SimState, StiffnessModel};
+use havok_cloth::simulate::{self, ParticleData, SimState};
 use havok_formats::cloth::{self, OperatorKind};
 use havok_formats::{Compendium, Tagfile};
 use inputs::{Game, OracleSet, Query, expect_found, resolve};
@@ -56,11 +56,6 @@ fn every_sim_cloth_of_both_installs_simulates_and_stays_finite() -> Result<(), B
                     };
                     let sim = &data.sim_cloths[usize::try_from(*sim_cloth)?];
                     let config = &configs[0];
-                    let model = if config.adapt_constraint_stiffness {
-                        StiffnessModel::Adaptive
-                    } else {
-                        StiffnessModel::Legacy
-                    };
                     let particles = ParticleData::new(sim);
                     let mut state = SimState::new(sim);
                     let pinned: Vec<_> = sim
@@ -69,7 +64,7 @@ fn every_sim_cloth_of_both_installs_simulates_and_stays_finite() -> Result<(), B
                         .map(|&f| state.positions[usize::from(f)])
                         .collect();
                     for _ in 0..60 {
-                        simulate::prepare(&mut state, 1.0 / 60.0, config.sub_steps, model);
+                        simulate::prepare(&mut state, 1.0 / 60.0, config.sub_steps);
                         simulate::simulate(
                             sim,
                             config,

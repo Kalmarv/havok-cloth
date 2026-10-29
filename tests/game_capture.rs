@@ -33,7 +33,7 @@ use havok_cloth::deform::{self, BoneSpaceLocal, LocalBlocks};
 use havok_cloth::matrix::Mat4;
 use havok_cloth::operators;
 use havok_cloth::simd::V4;
-use havok_cloth::simulate::{self, Action, ParticleData, SimState, StiffnessModel};
+use havok_cloth::simulate::{self, Action, ParticleData, SimState};
 use havok_formats::Tagfile;
 use havok_formats::animation::{self, Skeleton};
 use havok_formats::cloth::{self, Cloth, OperatorKind, SimulateConfig};
@@ -458,11 +458,6 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
     for capture in [Game::Sekiro, Game::Elden].into_iter().flat_map(captures) {
         let c = &capture.cloth;
         let (sim, config) = simulated(c);
-        let model = if config.adapt_constraint_stiffness {
-            StiffnessModel::Adaptive
-        } else {
-            StiffnessModel::Legacy
-        };
         let fixed_particles = !c.sim_cloths[sim].fixed_particles.is_empty();
         // the particles the move operators of the sim place on the skin (they end the step where they were placed)
         let placed: Vec<usize> = c
@@ -479,7 +474,7 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
             .collect();
         for (n, step) in capture.steps.iter().enumerate() {
             let mut notified = state_from(c, sim, &step.before);
-            simulate::prepare(&mut notified, step.dt, config.sub_steps, model);
+            simulate::prepare(&mut notified, step.dt, config.sub_steps);
             assert_eq!(
                 worst3(&notified.previous, &step.after_notify.previous),
                 0,
