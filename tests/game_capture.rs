@@ -6,8 +6,8 @@
 //! Havok cloth corpus that holds the cloth data, the cloth data's name, and the processor the game ran on (as Windows
 //! names it in `PROCESSOR_IDENTIFIER`).
 //!
-//! A frames file is `CLF4`, then five `u32`: steps, particles, bones, collidables, buffers; then per step (every value
-//! little-endian, a vector four `f32`, a matrix four columns of four `f32`):
+//! A frames file is `CLF5`, then six `u32`: steps, particles, bones, collidables, buffers, constraint states; then per
+//! step (every value little-endian, a vector four `f32`, a matrix four columns of four `f32`):
 //! - `f32` the frame's timestep;
 //! - three particle states: before the simulate operator's notify, after it, and after the step; each the last
 //!   substep length (`f32`), the damping (`f32`), the positions and the previous positions (a vector per particle);
@@ -17,11 +17,17 @@
 //! - the collidables after the notify, then after the step: per collidable its transform (a matrix), linear and
 //!   angular velocity (a vector each);
 //! - `u32` the number of action calls of the step, then per call its substep length (`f32`) and the forces the action
-//!   left (a vector per particle).
+//!   left (a vector per particle);
+//! - per constraint state the sim cloth instance keeps, `u32` its constraint set's index, `u32` its kind, then the
+//!   state after the notify and before the next notify: a volume constraint's (kind 1) the frame's three rotation
+//!   columns, its centre and the three eigenvectors that warm-start the next solve (a vector each); a transition
+//!   constraint's (kind 2) `u32` its state (0 simulated, 1 animated, 2 blending to animation, 3 blending to
+//!   simulation), `f32` the blend's time and per particle the `f32` distance it had from its reference vertex when its
+//!   blend to animation began.
 //!
-//! `CLF3` is the same without the buffers (four `u32`, and no matrices): every buffer in world space. The recorder
-//! keeps a buffer's matrices only where its snapshots hold the buffer object, so a capture whose buffers it did not
-//! keep is `CLF3`.
+//! The buffers count is 0 where the recorder did not keep every buffer's matrices (it keeps them only where its
+//! snapshots hold the buffer objects): every buffer in world space. Older files: `CLF4` is `CLF5` without the
+//! constraint states (five `u32`, and no states), `CLF3` also without the buffers (four `u32`).
 #![allow(
     clippy::unwrap_used,
     reason = "a real-data test reports what it cannot read as its failure"
@@ -29,11 +35,13 @@
 mod inputs;
 
 use havok_cloth::buffer::Buffer;
+use havok_cloth::constraints::{Transition, TransitionState};
 use havok_cloth::deform::{self, BoneSpaceLocal, LocalBlocks};
 use havok_cloth::matrix::Mat4;
 use havok_cloth::operators;
 use havok_cloth::simd::V4;
 use havok_cloth::simulate::{self, Action, ParticleData, SimState};
+use havok_cloth::volume::{Mat3, VolumeState};
 use havok_formats::Tagfile;
 use havok_formats::animation::{self, Skeleton};
 use havok_formats::cloth::{self, Cloth, OperatorKind, SimulateConfig};
@@ -64,6 +72,16 @@ struct Step {
     collidables_after: Vec<Collidable>,
     /// The action calls, in order: substep length and the forces after the call.
     actions: Vec<(f32, Vec<V4>)>,
+    /// Per constraint state of the instance: its constraint set's index, the state after the notify and before the
+    /// next notify.
+    constraints: Vec<(usize, ConstraintState, ConstraintState)>,
+}
+
+/// The state a sim cloth instance keeps for one constraint set.
+#[derive(Clone, Debug)]
+enum ConstraintState {
+    Volume(VolumeState),
+    Transition(Transition),
 }
 
 /// Reads little-endian values from the front of a byte slice.
@@ -98,14 +116,29 @@ impl Reader<'_> {
 
 fn read_steps(path: &Path) -> (usize, Vec<Step>) {
     let bytes = std::fs::read(path).unwrap();
-    let with_buffers = match &bytes[..4] {
-        b"CLF4" => true,
-        b"CLF3" => false,
+    let version = match &bytes[..4] {
+        b"CLF5" => 5,
+        b"CLF4" => 4,
+        b"CLF3" => 3,
         _ => panic!("{}: not a frames file", path.display()),
     };
     let mut r = Reader(&bytes[4..]);
     let [steps, particles, bones, collidables] = [(); 4].map(|()| r.u32() as usize);
-    let buffers = if with_buffers { r.u32() as usize } else { 0 };
+    let buffers = if version >= 4 { r.u32() as usize } else { 0 };
+    let constraints = if version >= 5 { r.u32() as usize } else { 0 };
+    let volume = |r: &mut Reader| {
+        let rotation = Mat3 {
+            cols: [r.v4(), r.v4(), r.v4()],
+        };
+        let translation = r.v4();
+        VolumeState {
+            rotation,
+            translation,
+            eigenvectors: Mat3 {
+                cols: [r.v4(), r.v4(), r.v4()],
+            },
+        }
+    };
     let state = |r: &mut Reader| Particles {
         last_time_step: r.f32(),
         damping: r.f32(),
@@ -126,6 +159,32 @@ fn read_steps(path: &Path) -> (usize, Vec<Step>) {
             let collidables_after = moved(&mut r);
             let calls = r.u32() as usize;
             let actions = (0..calls).map(|_| (r.f32(), r.vectors(particles))).collect();
+            let constraints = (0..constraints)
+                .map(|_| {
+                    let set = r.u32() as usize;
+                    let kind = r.u32();
+                    let state = |r: &mut Reader| match kind {
+                        1 => ConstraintState::Volume(volume(r)),
+                        2 => {
+                            let state = match r.u32() {
+                                0 => TransitionState::Simulated,
+                                1 => TransitionState::Animated,
+                                2 => TransitionState::ToAnimation,
+                                3 => TransitionState::ToSimulation,
+                                other => panic!("{}: transition state {other}", path.display()),
+                            };
+                            let time = r.f32();
+                            ConstraintState::Transition(Transition {
+                                state,
+                                time,
+                                max_distance: (0..particles).map(|_| r.f32()).collect(),
+                            })
+                        }
+                        other => panic!("{}: constraint state kind {other}", path.display()),
+                    };
+                    (set, state(&mut r), state(&mut r))
+                })
+                .collect();
             Step {
                 dt,
                 before,
@@ -136,6 +195,7 @@ fn read_steps(path: &Path) -> (usize, Vec<Step>) {
                 collidables_after_notify,
                 collidables_after,
                 actions,
+                constraints,
             }
         })
         .collect();
@@ -362,6 +422,16 @@ fn skin_and_move(
     buffers
 }
 
+/// The constraint states of a step's instance as the game left them after the notify.
+fn start_constraints(state: &mut SimState, step: &Step) {
+    for (set, start, _) in &step.constraints {
+        match start {
+            ConstraintState::Volume(v) => state.volumes[*set] = Some(*v),
+            ConstraintState::Transition(t) => state.transitions[*set] = Some(t.clone()),
+        }
+    }
+}
+
 /// The game's recorded action forces, played back one call per substep; counts the calls whose substep length is
 /// not the one the game passed.
 struct Recorded<'a> {
@@ -395,15 +465,17 @@ impl Action for Recorded<'_> {
 /// of 143 (next closest 1.8e-4 off, shuffled 2 to 8). The two `c1010` captures end before the step after which every
 /// pinned particle's previous position differs from its position, where the rest of their steps leave them equal: in
 /// that step (followed by 2.4 s without a step) the game moved the pinned particles once more after the simulation,
-/// onto bones between the step's and the next step's, so its state is not one step from the recorded one.
+/// onto bones between the step's and the next step's, and placed the collidables anew (2e9 ulp from where the step
+/// leaves them), as its transition constraint turned to blending to simulation, so its state is not one step from the
+/// recorded one. Recorded past it, the 12 steps after it match the game bit for bit again.
 const AT_REFERENCE_LENGTH: [(&str, usize); 7] = [
     ("muffler-cap4.clf3", 110),
-    ("muffler-cap5.clf3", 110),
-    ("neck-cap5.clf4", 110),
-    ("hakama-cap6.clf3", 97),
-    ("kusazuri-cap6.clf3", 115),
-    ("sleeve-cap6.clf3", 115),
-    ("rearrope-cap1.clf3", 123),
+    ("muffler-cap5.clf5", 110),
+    ("neck-cap5.clf5", 110),
+    ("hakama-cap6.clf5", 97),
+    ("kusazuri-cap6.clf5", 115),
+    ("sleeve-cap6.clf5", 115),
+    ("rearrope-cap1.clf5", 123),
 ];
 
 /// The transform set a cloth data reads is the skeleton of its name in the same tagfile, bone for bone, in world
@@ -508,14 +580,13 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
     }
 }
 
-/// The whole simulate step, with the game's own action forces played back: positions, previous positions and the
-/// collidables after the step. Compared only on the processor the capture was made on (the approximate reciprocals
-/// differ between processors).
+/// The whole simulate step from the state after the notify, with the game's own action forces and the instance's
+/// constraint states played back: positions, previous positions, the collidables and the constraint states after the
+/// step, bit for bit in every step of every capture that holds what a step reads. Compared only on the processor the
+/// capture was made on (the approximate reciprocals differ between processors).
 #[test]
-#[ignore = "not yet shown bit for bit: the collidables' drive differed in the last bits in 101 of 299 steps of the \
-            first Sekiro capture while the four-lane dot summed in another order than the game's, and the positions \
-            have not been compared with the action forces played back"]
 fn the_simulate_step_matches_the_game_bit_for_bit() {
+    let mut failed = Vec::new();
     for capture in [Game::Sekiro, Game::Elden].into_iter().flat_map(captures) {
         if std::env::var("PROCESSOR_IDENTIFIER").ok().as_deref() != Some(capture.processor.as_str()) {
             eprintln!(
@@ -524,9 +595,50 @@ fn the_simulate_step_matches_the_game_bit_for_bit() {
             );
             continue;
         }
+        // a capture made before the recorder kept the game's action calls holds none in any step: its forces are
+        // unknown
+        if capture.steps.iter().all(|s| s.actions.is_empty()) {
+            eprintln!(
+                "{}: recorded without the game's action calls, not compared",
+                capture.name
+            );
+            continue;
+        }
         let c = &capture.cloth;
         let (sim, config) = simulated(c);
         let sim_cloth = &c.sim_cloths[sim];
+        // a volume constraint's solve starts from the eigenvectors of its last, a transition's from where its blend
+        // is: a capture made before the recorder kept them cannot start a step where the game did
+        let kept = sim_cloth
+            .constraint_sets
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.kind,
+                    cloth::ConstraintKind::VolumeMx { .. } | cloth::ConstraintKind::Transition { .. }
+                )
+            })
+            .count();
+        if capture.steps.iter().any(|s| s.constraints.len() != kept) {
+            eprintln!(
+                "{}: recorded without its constraints' state, not compared",
+                capture.name
+            );
+            continue;
+        }
+        // collidables the game gives the instance at run time are not the cloth data's: the frames file records how
+        // they move but not their shapes (Elden Ring's rope collides with two the character adds; its data has none)
+        if capture
+            .steps
+            .iter()
+            .any(|s| s.collidables_after_notify.len() != sim_cloth.collidables.len())
+        {
+            eprintln!(
+                "{}: collides with collidables its cloth data does not hold, not compared",
+                capture.name
+            );
+            continue;
+        }
         let data = ParticleData::new(sim_cloth);
         let mut differ = Vec::new();
         for (n, step) in capture.steps.iter().enumerate() {
@@ -536,6 +648,7 @@ fn the_simulate_step_matches_the_game_bit_for_bit() {
                 rc.linear_velocity = *l;
                 rc.angular_velocity = *a;
             }
+            start_constraints(&mut state, step);
             let buffers = skin_and_move(c, sim, step, &mut state, !sim_cloth.fixed_particles.is_empty());
             let mut recorded = Recorded {
                 calls: &step.actions,
@@ -566,17 +679,17 @@ fn the_simulate_step_matches_the_game_bit_for_bit() {
                     step.dt,
                 );
             }
-            assert_eq!(
-                recorded.next,
-                step.actions.len(),
-                "{} step {n}: action calls",
-                capture.name
-            );
-            assert_eq!(
-                recorded.other_time_steps, 0,
-                "{} step {n}: action substep lengths",
-                capture.name
-            );
+            if recorded.next != step.actions.len() || recorded.other_time_steps != 0 {
+                differ.push(format!(
+                    "step {n}: {} action calls where the game made {}, {} with another substep length \
+                     (the game's {:?}, ours {})",
+                    recorded.next,
+                    step.actions.len(),
+                    recorded.other_time_steps,
+                    step.actions.iter().map(|(t, _)| *t).collect::<Vec<_>>(),
+                    step.dt / f32::from(config.sub_steps.max(1)),
+                ));
+            }
             let collidables = state
                 .collidables
                 .iter()
@@ -587,24 +700,57 @@ fn the_simulate_step_matches_the_game_bit_for_bit() {
                 })
                 .max()
                 .unwrap_or(0);
+            // the constraints' state: a volume's frame and eigenvectors (the rotation's `w` lanes are left undefined),
+            // a transition's distances at the start of its blend (its state and time move on before the next notify)
+            let constraints = step
+                .constraints
+                .iter()
+                .map(|(set, _, game)| match game {
+                    ConstraintState::Volume(game) => {
+                        let ours = state.volumes[*set].unwrap();
+                        worst3(&ours.rotation.cols, &game.rotation.cols)
+                            .max(worst3(&[ours.translation], &[game.translation]))
+                            .max(worst3(&ours.eigenvectors.cols, &game.eigenvectors.cols))
+                    }
+                    ConstraintState::Transition(game) => {
+                        let ours = state.transitions[*set].as_ref().unwrap();
+                        ours.max_distance
+                            .iter()
+                            .zip(&game.max_distance)
+                            .map(|(&a, &b)| ulps(a, b))
+                            .max()
+                            .unwrap_or(0)
+                    }
+                })
+                .max()
+                .unwrap_or(0);
             let worst = [
                 worst3(&state.positions, &step.after.positions),
                 worst3(&state.previous, &step.after.previous),
                 collidables,
+                constraints,
             ];
-            if worst != [0; 3] {
+            if worst != [0; 4] {
                 differ.push(format!(
-                    "step {n}: positions, previous, collidables differ by {worst:?} ulp"
+                    "step {n}: positions, previous, collidables, constraint states differ by {worst:?} ulp"
                 ));
             }
         }
-        assert!(
-            differ.is_empty(),
-            "{}: {} of {} steps differ:\n{}",
+        eprintln!(
+            "{}: {} of {} steps differ",
             capture.name,
             differ.len(),
-            capture.steps.len(),
-            differ.join("\n")
+            capture.steps.len()
         );
+        if !differ.is_empty() {
+            failed.push(format!(
+                "{}: {} of {} steps differ:\n{}",
+                capture.name,
+                differ.len(),
+                capture.steps.len(),
+                differ.join("\n")
+            ));
+        }
     }
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }

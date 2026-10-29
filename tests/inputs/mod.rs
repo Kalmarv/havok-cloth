@@ -37,13 +37,13 @@ primase_testdata::inputs! {
         Query::Oracle(OracleSet::Capture, Game::Sekiro, "havok-cloth") => {
             status: Live,
             gate: false,
-            about: r#"cloth steps of the player's scarf and robes and of NPC cloths with bone deformers, recorded from the running game: `captures.tsv` (frames file, tagfile of the Sekiro havok-cloth corpus, cloth data, processor) and one `CLF4` frames file (`CLF3` where the recorder did not keep the buffers' matrices) per capture (layout in tests/game_capture.rs); tests/game_capture.rs replays them"#,
+            about: r#"cloth steps of the player's scarf and robes and of NPC cloths with bone deformers, recorded from the running game: `captures.tsv` (frames file, tagfile of the Sekiro havok-cloth corpus, cloth data, processor) and one `CLF5` frames file per capture (with the buffers' matrices where the recorder kept them, and the instance's volume and transition constraint states; `CLF3` for the first scarf capture, recorded before the recorder kept the game's action calls) (layouts in tests/game_capture.rs); tests/game_capture.rs replays them"#,
             source: r#"the recorder's capture of the game in play, cut to one cloth data's steps"#,
         },
         Query::Oracle(OracleSet::Capture, Game::Elden, "havok-cloth") => {
             status: Live,
             gate: false,
-            about: r#"cloth steps of the player's armour ropes, recorded from the running game, laid out as for Sekiro (tagfiles of the Elden Ring havok-cloth corpus); tests/game_capture.rs replays them"#,
+            about: r#"cloth steps of the player's armour ropes, recorded from the running game, laid out as for Sekiro (`CLF5`; tagfiles of the Elden Ring havok-cloth corpus); tests/game_capture.rs replays them"#,
             source: r#"the recorder's capture of the game in play, cut to one cloth data's steps"#,
         },
     }
