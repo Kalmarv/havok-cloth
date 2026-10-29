@@ -362,7 +362,8 @@ pub fn simulate(
     };
     let n = u32::from(config.sub_steps.max(1));
     let time_step = frame_dt / state.slow_motion;
-    let sub = time_step / n as f32;
+    // the substep: the frame's time step times the reciprocal of the substep count (not divided by it)
+    let sub = time_step * (1.0 / n as f32);
     let preserve_velocity = model == StiffnessModel::Adaptive
         && (n != 1 || state.slow_motion != 1.0 || state.world_stepping != 1.0);
     drive_collidables(sim, state, bones, time_step);
