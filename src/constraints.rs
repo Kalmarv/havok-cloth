@@ -2,7 +2,7 @@
 //! what the set asks for, scaled by the set's stiffness for this substep.
 
 use crate::buffer::Buffer;
-use crate::simd::{V4, min_ps, rcp23, rcp23_or_zero};
+use crate::simd::{V4, min_ps, rcp23_or_zero};
 use havok_formats::cloth::{
     BendLink, BendStiffnessLink, CompressibleLink, Link, LocalRange, LocalRangeShape, TransitionParticle,
 };
