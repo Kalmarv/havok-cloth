@@ -314,7 +314,10 @@ pub struct TransitionPeriods {
 
 /// Transition constraints: in the animated state each particle sits on its reference vertex; while blending, a
 /// particle is pulled to within a distance of its reference vertex that shrinks (to animation) or grows (to
-/// simulation) over the period, after the particle's delay.
+/// simulation) over the period, after the particle's delay. The game divides here where other constraints take the
+/// refined reciprocal: the bound is `((1 - (1/period)*t) * startDistance) * (1/s)` blending to animation and
+/// `(((1/period)*t) * toSimMaxDistance) * (1/s)` blending to simulation, and a particle beyond it moves by
+/// `(bound - distance) / distance` of its offset from the reference vertex.
 ///
 /// Blending to simulation, the first particle whose blend has finished ends the pass: the particles after it in the
 /// set's list are left alone for that solve.
@@ -336,7 +339,7 @@ pub fn transition(
         TransitionState::ToAnimation | TransitionState::ToSimulation if s <= 0.0 => return,
         _ => {}
     }
-    let inv_stiffness = rcp23(s);
+    let inv_stiffness = 1.0 / s;
     let time = instance.time;
     match instance.state {
         TransitionState::Simulated => {}
@@ -349,7 +352,7 @@ pub fn transition(
         }
         TransitionState::ToAnimation => {
             let period = periods.to_anim;
-            let per_time = rcp23(period) * inv_stiffness;
+            let per_period = 1.0 / period;
             for pp in particles {
                 let i = usize::from(pp.particle);
                 let Some(origin) = reference.world_position(usize::from(pp.reference_vertex)) else {
@@ -367,9 +370,9 @@ pub fn transition(
                     p.positions[i] = origin;
                 } else {
                     let start = instance.max_distance.get(i).copied().unwrap_or(f32::MAX);
-                    let max_distance = start * (inv_stiffness - t * per_time);
+                    let max_distance = ((1.0 - per_period * t) * start) * inv_stiffness;
                     if distance > max_distance {
-                        let step = (max_distance - distance) * rcp23(distance);
+                        let step = (max_distance - distance) / distance;
                         p.positions[i] = p.positions[i].add_scaled(diff, step);
                         restore_velocity(p, i, velocity);
                     }
@@ -378,7 +381,7 @@ pub fn transition(
         }
         TransitionState::ToSimulation => {
             let period = periods.to_sim;
-            let per_time = rcp23(period) * inv_stiffness;
+            let per_period = 1.0 / period;
             for pp in particles {
                 let i = usize::from(pp.particle);
                 let Some(origin) = reference.world_position(usize::from(pp.reference_vertex)) else {
@@ -393,9 +396,9 @@ pub fn transition(
                     let velocity = preserved_velocity(p, i, preserve_velocity);
                     let diff = p.positions[i].sub(origin);
                     let distance = diff.length3();
-                    let max_distance = (pp.to_sim_max_distance * t) * per_time;
+                    let max_distance = ((per_period * t) * pp.to_sim_max_distance) * inv_stiffness;
                     if distance > max_distance {
-                        let step = (max_distance - distance) * rcp23(distance);
+                        let step = (max_distance - distance) / distance;
                         p.positions[i] = p.positions[i].add_scaled(diff, step);
                         restore_velocity(p, i, velocity);
                     }

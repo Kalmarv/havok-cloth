@@ -11,6 +11,9 @@
   differed in the last bit for three substeps).
 - `volume`: a batch's target adds the frame's centre after its first column, as the game does (the moved particles
   differed in the last bit).
+- `constraints`: a transition's blend divides where it took the refined reciprocal (`1/period`, `1/s`, the move
+  `(bound - distance) / distance`) and associates the bound as the game does (the blended particles differed in the
+  last bits).
 
 ## 0.1.0 (2026-10-29)
 
