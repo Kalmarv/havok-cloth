@@ -635,7 +635,6 @@ impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
     }
 }
 
-/// Copies every component `from` has into `to`, vertex by vertex, as far as both reach.
 /// The bones the cloth data's bone deformers set, as (transform set, bone) pairs: what a caller reads back after a step
 /// (the cloth-driven bones); every other transform is the caller's. A simple mesh bone deformer sets the bone of each
 /// pair that has a local transform (its byte offset over 64), a mesh bone deformer each bone with entries.
@@ -671,6 +670,7 @@ pub fn driven_bones(data: &Cloth) -> BTreeSet<(u32, usize)> {
     out
 }
 
+/// Copies every component `from` has into `to`, vertex by vertex, as far as both reach.
 fn copy_components(from: &Buffer, to: &mut Buffer) {
     for (src, dst) in [
         (&from.positions, &mut to.positions),
