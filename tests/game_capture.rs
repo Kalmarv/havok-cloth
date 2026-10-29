@@ -326,10 +326,12 @@ impl Action for Recorded<'_> {
 /// script (numpy, in `f64`): in Sekiro, of the 138 bones of the player's skeleton with a parent and a reference offset
 /// longer than 1e-3, 110 in both steps of both scarf captures (the next closest is 9e-4 off), where the same skeleton
 /// with its parents shuffled gives 5 to 7 (the bones the game does not fill keep stale values); in Elden Ring, 123 of
-/// 124 (the next closest is 11 off), shuffled 4 to 8.
-const AT_REFERENCE_LENGTH: [(&str, usize); 3] = [
+/// 124 (the next closest is 11 off), shuffled 4 to 8. The neck capture's bones are the scarf capture's of the same run,
+/// byte for byte in all 299 steps (the game gives the part's cloth instances one transform set).
+const AT_REFERENCE_LENGTH: [(&str, usize); 4] = [
     ("muffler-cap4.clf3", 110),
     ("muffler-cap5.clf3", 110),
+    ("neck-cap5.clf3", 110),
     ("rearrope-cap1.clf3", 123),
 ];
 
