@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 (2026-10-29)
 
 The first version: the simulate operator for one sim cloth, as Sekiro and Elden Ring run it.
 
@@ -36,3 +36,4 @@ The first version: the simulate operator for one sim cloth, as Sekiro and Elden 
   cloth at run time: the data holds none).
 - Tests: unit tests of every step against independent expectations, and every sim cloth of both installs simulated
   from its rest pose (`GAME_DATA`).
+
