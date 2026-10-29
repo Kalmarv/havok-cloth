@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (2026-10-29)
 
 - `instance`: an operator reads the triangles of the buffer it names, also where the state holds that buffer's
   vertices in a shadow buffer. A shadowed display buffer's vertex frames (`hclUpdateAllVertexFramesOperator`) were
