@@ -2,6 +2,9 @@
 //! time. A step runs the state's operators as the games do: every operator's notification first (the simulate
 //! operator's substep length and damping), then each operator in the state's order.
 
+use std::collections::BTreeSet;
+use std::ops::Deref;
+
 use crate::buffer::Buffer;
 use crate::deform::{self, BoneSpaceLocal, LocalBlocks, NormalScale};
 use crate::matrix::Mat4;
@@ -39,10 +42,11 @@ pub enum Refusal {
     },
 }
 
-/// A cloth data at run time.
+/// A cloth data at run time. `D` holds the data: a borrow (`&Cloth`) or an owner (`Arc<Cloth>`, for an instance kept
+/// beside the data it was made of).
 #[derive(Debug)]
-pub struct ClothInstance<'a> {
-    data: &'a Cloth,
+pub struct ClothInstance<D: Deref<Target = Cloth> + Clone> {
+    data: D,
     /// The buffers, by buffer definition. Those of the particle types mirror their sim cloth's particles, which the
     /// instance copies in before and back after each operator.
     pub buffers: Vec<Buffer>,
@@ -60,9 +64,9 @@ pub struct ClothInstance<'a> {
     pub state: usize,
 }
 
-impl<'a> ClothInstance<'a> {
+impl<D: Deref<Target = Cloth> + Clone> ClothInstance<D> {
     /// An instance of `data` at its rest pose, in its first state; refuses operator classes it does not run.
-    pub fn new(data: &'a Cloth) -> Result<ClothInstance<'a>, Refusal> {
+    pub fn new(data: D) -> Result<ClothInstance<D>, Refusal> {
         for (index, op) in data.operators.iter().enumerate() {
             if let OperatorKind::Other { class } = &op.kind {
                 return Err(Refusal::Operator {
@@ -115,8 +119,8 @@ impl<'a> ClothInstance<'a> {
     }
 
     /// The cloth data.
-    pub fn data(&self) -> &'a Cloth {
-        self.data
+    pub fn data(&self) -> &Cloth {
+        &self.data
     }
 
     /// The buffer an operator of the current state reads or writes for buffer `index`: its shadow buffer when the
@@ -183,7 +187,9 @@ impl<'a> ClothInstance<'a> {
 
     /// One step of the current state, `dt` long. `actions[s]` adds forces to sim cloth `s` on every substep.
     pub fn step(&mut self, dt: f32, actions: &mut [Vec<&mut dyn Action>]) -> Result<(), Refusal> {
-        let data = self.data;
+        // a handle of its own, so the data stays readable while the instance changes
+        let owner = self.data.clone();
+        let data: &Cloth = &owner;
         let Some(state) = data.states.get(self.state) else {
             return Ok(());
         };
@@ -630,6 +636,41 @@ impl<'a> ClothInstance<'a> {
 }
 
 /// Copies every component `from` has into `to`, vertex by vertex, as far as both reach.
+/// The bones the cloth data's bone deformers set, as (transform set, bone) pairs: what a caller reads back after a step
+/// (the cloth-driven bones); every other transform is the caller's. A simple mesh bone deformer sets the bone of each
+/// pair that has a local transform (its byte offset over 64), a mesh bone deformer each bone with entries.
+pub fn driven_bones(data: &Cloth) -> BTreeSet<(u32, usize)> {
+    let mut out = BTreeSet::new();
+    for op in &data.operators {
+        match &op.kind {
+            OperatorKind::SimpleMeshBoneDeform {
+                output_transform_set,
+                triangle_bone_pairs,
+                local_bone_transforms,
+                ..
+            } => out.extend(
+                triangle_bone_pairs
+                    .iter()
+                    .zip(local_bone_transforms)
+                    .map(|(&(bone_offset, _), _)| (*output_transform_set, usize::from(bone_offset) / 64)),
+            ),
+            OperatorKind::MeshBoneDeform {
+                output_transform_set,
+                triangle_bone_start_for_bone,
+                ..
+            } => out.extend(
+                triangle_bone_start_for_bone
+                    .windows(2)
+                    .enumerate()
+                    .filter(|(_, w)| w[0] < w[1])
+                    .map(|(b, _)| (*output_transform_set, b)),
+            ),
+            _ => {}
+        }
+    }
+    out
+}
+
 fn copy_components(from: &Buffer, to: &mut Buffer) {
     for (src, dst) in [
         (&from.positions, &mut to.positions),
@@ -640,5 +681,76 @@ fn copy_components(from: &Buffer, to: &mut Buffer) {
         for (d, s) in dst.iter_mut().zip(src) {
             *d = *s;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use havok_formats::cloth::{MeshBoneTriangle, Operator};
+    use std::sync::Arc;
+
+    fn operator(kind: OperatorKind) -> Operator {
+        Operator {
+            name: String::new(),
+            id: 0,
+            operator_type: 0,
+            used_buffers: Vec::new(),
+            used_transform_sets: Vec::new(),
+            kind,
+        }
+    }
+
+    fn cloth(operators: Vec<Operator>) -> Cloth {
+        Cloth {
+            name: "test".into(),
+            target_platform: 2,
+            sim_cloths: Vec::new(),
+            buffers: Vec::new(),
+            transform_sets: Vec::new(),
+            operators,
+            states: Vec::new(),
+            state_transitions: Vec::new(),
+            actions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn driven_bones_are_the_bones_the_deformers_set() {
+        let pair = |triangle| MeshBoneTriangle {
+            local_bone_transform: [0.0; 16],
+            weight: 1.0,
+            triangle,
+        };
+        let data = cloth(vec![
+            // byte offsets 64 and 192: bones 1 and 3; the third pair has no local transform, so sets nothing
+            operator(OperatorKind::SimpleMeshBoneDeform {
+                input_buffer: 0,
+                output_transform_set: 0,
+                triangle_bone_pairs: vec![(64, 0), (192, 6), (320, 12)],
+                local_bone_transforms: vec![[0.0; 16]; 2],
+            }),
+            // entries 0..1 for bone 0, none for bone 1, 1..3 for bone 2
+            operator(OperatorKind::MeshBoneDeform {
+                input_buffer: 0,
+                output_transform_set: 1,
+                triangle_bone_pairs: vec![pair(0), pair(1), pair(2)],
+                triangle_bone_start_for_bone: vec![0, 1, 1, 3],
+            }),
+        ]);
+        let want: BTreeSet<(u32, usize)> = [(0, 1), (0, 3), (1, 0), (1, 2)].into_iter().collect();
+        assert_eq!(driven_bones(&data), want);
+    }
+
+    #[test]
+    fn an_instance_may_own_its_data() {
+        let data = Arc::new(cloth(Vec::new()));
+        let mut owned = ClothInstance::new(Arc::clone(&data)).expect("no operators to refuse");
+        let mut borrowed = ClothInstance::new(&*data).expect("no operators to refuse");
+        // no states: a step runs nothing
+        owned.step(1.0 / 30.0, &mut []).expect("nothing to refuse");
+        borrowed.step(1.0 / 30.0, &mut []).expect("nothing to refuse");
+        assert_eq!(owned.data().name, "test");
+        assert_eq!(borrowed.data().name, "test");
     }
 }
