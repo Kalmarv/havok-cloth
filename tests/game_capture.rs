@@ -6,16 +6,22 @@
 //! Havok cloth corpus that holds the cloth data, the cloth data's name, and the processor the game ran on (as Windows
 //! names it in `PROCESSOR_IDENTIFIER`).
 //!
-//! A frames file is `CLF3`, then four `u32`: steps, particles, bones, collidables; then per step (every value
+//! A frames file is `CLF4`, then five `u32`: steps, particles, bones, collidables, buffers; then per step (every value
 //! little-endian, a vector four `f32`, a matrix four columns of four `f32`):
 //! - `f32` the frame's timestep;
 //! - three particle states: before the simulate operator's notify, after it, and after the step; each the last
 //!   substep length (`f32`), the damping (`f32`), the positions and the previous positions (a vector per particle);
 //! - the bones of the transform set the step reads (a matrix each);
+//! - per buffer of the cloth data, in order, the matrix from its space to the world and its inverse, as the game
+//!   supplies them after the notify (a matrix each);
 //! - the collidables after the notify, then after the step: per collidable its transform (a matrix), linear and
 //!   angular velocity (a vector each);
 //! - `u32` the number of action calls of the step, then per call its substep length (`f32`) and the forces the action
 //!   left (a vector per particle).
+//!
+//! `CLF3` is the same without the buffers (four `u32`, and no matrices): every buffer in world space. The recorder
+//! keeps a buffer's matrices only where its snapshots hold the buffer object, so a capture whose buffers it did not
+//! keep is `CLF3`.
 #![allow(
     clippy::unwrap_used,
     reason = "a real-data test reports what it cannot read as its failure"
@@ -23,7 +29,7 @@
 mod inputs;
 
 use havok_cloth::buffer::Buffer;
-use havok_cloth::deform::{self, LocalBlocks};
+use havok_cloth::deform::{self, BoneSpaceLocal, LocalBlocks};
 use havok_cloth::matrix::Mat4;
 use havok_cloth::operators;
 use havok_cloth::simd::V4;
@@ -52,6 +58,8 @@ struct Step {
     after_notify: Particles,
     after: Particles,
     bones: Vec<Mat4>,
+    /// Per buffer, its world-from-mesh and mesh-from-world matrices (empty: every buffer in world space).
+    buffers: Vec<(Mat4, Mat4)>,
     collidables_after_notify: Vec<Collidable>,
     collidables_after: Vec<Collidable>,
     /// The action calls, in order: substep length and the forces after the call.
@@ -90,9 +98,14 @@ impl Reader<'_> {
 
 fn read_steps(path: &Path) -> (usize, Vec<Step>) {
     let bytes = std::fs::read(path).unwrap();
-    assert_eq!(&bytes[..4], b"CLF3", "{}: not a frames file", path.display());
+    let with_buffers = match &bytes[..4] {
+        b"CLF4" => true,
+        b"CLF3" => false,
+        _ => panic!("{}: not a frames file", path.display()),
+    };
     let mut r = Reader(&bytes[4..]);
     let [steps, particles, bones, collidables] = [(); 4].map(|()| r.u32() as usize);
+    let buffers = if with_buffers { r.u32() as usize } else { 0 };
     let state = |r: &mut Reader| Particles {
         last_time_step: r.f32(),
         damping: r.f32(),
@@ -108,6 +121,7 @@ fn read_steps(path: &Path) -> (usize, Vec<Step>) {
             let after_notify = state(&mut r);
             let after = state(&mut r);
             let bones = (0..bones).map(|_| r.mat()).collect();
+            let buffers = (0..buffers).map(|_| (r.mat(), r.mat())).collect();
             let collidables_after_notify = moved(&mut r);
             let collidables_after = moved(&mut r);
             let calls = r.u32() as usize;
@@ -118,6 +132,7 @@ fn read_steps(path: &Path) -> (usize, Vec<Step>) {
                 after_notify,
                 after,
                 bones,
+                buffers,
                 collidables_after_notify,
                 collidables_after,
                 actions,
@@ -198,6 +213,14 @@ fn captures(game: Game) -> Vec<Capture> {
             .find(|s| s.name == *set)
             .unwrap_or_else(|| panic!("{tagfile} has no skeleton {set}"));
         let (particles, steps) = read_steps(&dir.join(frames));
+        for step in &steps {
+            assert!(
+                step.buffers.is_empty() || step.buffers.len() == cloth.buffers.len(),
+                "{frames}: the matrices of {} buffers, the cloth data has {}",
+                step.buffers.len(),
+                cloth.buffers.len()
+            );
+        }
         let sim = simulated(&cloth).0;
         assert_eq!(
             particles,
@@ -237,20 +260,39 @@ fn state_from(c: &Cloth, sim: usize, p: &Particles) -> SimState {
     state
 }
 
-/// The operators of the cloth's first state up to the simulate operator, from the recorded state after the notify:
-/// the skins into the buffers the moves read (the recorded bones are the transform set they skin by), then the moves
-/// of the pinned particles to their skinned vertices. Returns the buffers.
-fn skin_and_move(c: &Cloth, step: &Step, state: &mut SimState, fixed_particles: bool) -> Vec<Buffer> {
+/// The operators of the cloth's first state up to the simulate operator of sim cloth `sim`, from the recorded state
+/// after the notify: the skins into the buffers the sim's moves read (the recorded bones are the transform set they
+/// skin by), then the moves of its pinned particles to their skinned vertices, each buffer in the space the game gave
+/// it. Returns the buffers.
+fn skin_and_move(
+    c: &Cloth,
+    sim: usize,
+    step: &Step,
+    state: &mut SimState,
+    fixed_particles: bool,
+) -> Vec<Buffer> {
     let mut buffers: Vec<Buffer> = c
         .buffers
         .iter()
-        .map(|b| Buffer::new(b.vertices as usize))
+        .enumerate()
+        .map(|(i, b)| {
+            let mut buffer = Buffer::new(b.vertices as usize);
+            if let Some(&(world_from_mesh, mesh_from_world)) = step.buffers.get(i) {
+                buffer.world_from_mesh = world_from_mesh;
+                buffer.mesh_from_world = mesh_from_world;
+            }
+            buffer
+        })
         .collect();
     let moved_from: Vec<u32> = c
         .operators
         .iter()
         .filter_map(|op| match &op.kind {
-            OperatorKind::MoveParticles { reference_buffer, .. } => Some(*reference_buffer),
+            OperatorKind::MoveParticles {
+                reference_buffer,
+                sim_cloth,
+                ..
+            } if *sim_cloth as usize == sim => Some(*reference_buffer),
             _ => None,
         })
         .collect();
@@ -280,11 +322,30 @@ fn skin_and_move(c: &Cloth, step: &Step, state: &mut SimState, fixed_particles: 
                 };
                 deform::deform(deformer, blocks, *components, &composite, out);
             }
+            OperatorKind::BoneSpaceSkin {
+                components,
+                transform_subset,
+                output_buffer,
+                deformer,
+                local,
+                local_unpacked,
+                ..
+            } if moved_from.contains(output_buffer) => {
+                let out = &mut buffers[*output_buffer as usize];
+                let composite =
+                    deform::bone_space_composite(&out.mesh_from_world, &step.bones, transform_subset);
+                let blocks = if local.is_empty() {
+                    BoneSpaceLocal::Unpacked(local_unpacked)
+                } else {
+                    BoneSpaceLocal::Packed(local)
+                };
+                deform::bone_space_deform(deformer, blocks, *components, &composite, out);
+            }
             OperatorKind::MoveParticles {
                 pairs,
                 reference_buffer,
-                ..
-            } => {
+                sim_cloth,
+            } if *sim_cloth as usize == sim => {
                 let reference = buffers[*reference_buffer as usize].clone();
                 operators::move_particles(
                     &reference,
@@ -294,7 +355,7 @@ fn skin_and_move(c: &Cloth, step: &Step, state: &mut SimState, fixed_particles: 
                     fixed_particles,
                 );
             }
-            OperatorKind::Simulate { .. } => break,
+            OperatorKind::Simulate { sim_cloth, .. } if *sim_cloth as usize == sim => break,
             _ => {}
         }
     }
@@ -327,11 +388,21 @@ impl Action for Recorded<'_> {
 /// longer than 1e-3, 110 in both steps of both scarf captures (the next closest is 9e-4 off), where the same skeleton
 /// with its parents shuffled gives 5 to 7 (the bones the game does not fill keep stale values); in Elden Ring, 123 of
 /// 124 (the next closest is 11 off), shuffled 4 to 8. The neck capture's bones are the scarf capture's of the same run,
-/// byte for byte in all 299 steps (the game gives the part's cloth instances one transform set).
-const AT_REFERENCE_LENGTH: [(&str, usize); 4] = [
+/// byte for byte in all 299 steps (the game gives the part's cloth instances one transform set). Sekiro's NPC cloths of
+/// the sixth capture, whose bone deformers drive bones (the same script on the tagfiles' own skeletons): `c1010_hakama`
+/// 97 of 123 (next closest 5.7e-4 off, shuffled 1 to 7), `c1010_kusazuri` 115 of 123 (the rest hundreds of metres off,
+/// shuffled 1 to 7: the same character's other cloth instance, with a transform set of its own) and `c7200_sleeve` 115
+/// of 143 (next closest 1.8e-4 off, shuffled 2 to 8). The two `c1010` captures end before the step after which every
+/// pinned particle's previous position differs from its position, where the rest of their steps leave them equal: in
+/// that step (followed by 2.4 s without a step) the game moved the pinned particles once more after the simulation,
+/// onto bones between the step's and the next step's, so its state is not one step from the recorded one.
+const AT_REFERENCE_LENGTH: [(&str, usize); 7] = [
     ("muffler-cap4.clf3", 110),
     ("muffler-cap5.clf3", 110),
-    ("neck-cap5.clf3", 110),
+    ("neck-cap5.clf4", 110),
+    ("hakama-cap6.clf3", 97),
+    ("kusazuri-cap6.clf3", 115),
+    ("sleeve-cap6.clf3", 115),
     ("rearrope-cap1.clf3", 123),
 ];
 
@@ -377,9 +448,11 @@ fn the_transform_set_is_the_skeleton_of_its_name_in_world_space() {
     }
 }
 
-/// The notify's rescaling of the previous positions, and the pinned particles moved onto the skin, bit for bit in every
-/// step of every capture. The first capture of the scarf of Sekiro's player (`BD_M_9040_muffler`, 299 steps) gave
-/// these on the processor it was made on; the others have not been replayed yet.
+/// The notify's rescaling of the previous positions, and the pinned particles of the simulated sim cloth moved onto the
+/// skin, bit for bit in every step of every capture, on the processor the captures were made on: the scarf, its neck
+/// (skinned into its display buffer, which the game places in the character's space: the frames file holds the
+/// buffers' matrices), the rope, and the NPC cloths with bone deformers (object-space skins, and a bone-space skin
+/// for the sleeve, whose cloth data has two sim cloths).
 #[test]
 fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
     for capture in [Game::Sekiro, Game::Elden].into_iter().flat_map(captures) {
@@ -391,12 +464,14 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
             StiffnessModel::Legacy
         };
         let fixed_particles = !c.sim_cloths[sim].fixed_particles.is_empty();
-        // the particles the move operators place on the skin (they end the step where they were placed)
+        // the particles the move operators of the sim place on the skin (they end the step where they were placed)
         let placed: Vec<usize> = c
             .operators
             .iter()
             .filter_map(|op| match &op.kind {
-                OperatorKind::MoveParticles { pairs, .. } => Some(pairs),
+                OperatorKind::MoveParticles { pairs, sim_cloth, .. } if *sim_cloth as usize == sim => {
+                    Some(pairs)
+                }
                 _ => None,
             })
             .flatten()
@@ -425,7 +500,7 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
             );
 
             let mut state = state_from(c, sim, &step.after_notify);
-            skin_and_move(c, step, &mut state, fixed_particles);
+            skin_and_move(c, sim, step, &mut state, fixed_particles);
             for &p in &placed {
                 assert_eq!(
                     worst3(&state.positions[p..=p], &step.after.positions[p..=p]),
@@ -466,7 +541,7 @@ fn the_simulate_step_matches_the_game_bit_for_bit() {
                 rc.linear_velocity = *l;
                 rc.angular_velocity = *a;
             }
-            let buffers = skin_and_move(c, step, &mut state, !sim_cloth.fixed_particles.is_empty());
+            let buffers = skin_and_move(c, sim, step, &mut state, !sim_cloth.fixed_particles.is_empty());
             let mut recorded = Recorded {
                 calls: &step.actions,
                 next: 0,
