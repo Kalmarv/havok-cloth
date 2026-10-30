@@ -96,9 +96,19 @@ GAME_DATA=game-data.toml cargo test --release
   replayed and compared bit for bit. Captures are game data and are never part of the repository; the tests skip
   without them. A capture records the CPU it was made on, because of the last-bit differences above.
 
+`SimState::stiffness_model` selects the legacy or adaptive model; it is legacy by default, matching a newly
+created game instance. `prepare` reads it from the state. A configuration's `adaptConstraintStiffness` controls
+velocity retention over substeps rather than selecting that model. Vertex-frame operators use the named buffer's
+triangles even when its vertices are held in a state's shadow buffer.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Check the examples
+
+From the repository root, `cargo test -p havok-cloth --doc` checks the crate documentation, and
+`cargo build -p havok-cloth --examples` builds its example programs. Examples that read paths need the caller's files; the repository ships no game assets.
 
 ## Licence
 
