@@ -1020,15 +1020,18 @@ impl Action for Checked<'_> {
             }
         };
         let mut ours = forces.to_vec();
-        WindAction {
-            wind,
-            stiffness: call.stiffness,
-            stride: call.stride,
-            mass: self.mass,
-            total_mass: self.total_mass,
-            normals: self.normals,
-        }
-        .apply(state, time_step, &mut ours);
+        let mut action = WindAction::elden_ring(wind, self.mass, self.total_mass, self.normals);
+        assert_eq!(
+            action.stiffness.to_bits(),
+            call.stiffness.to_bits(),
+            "initialized stiffness"
+        );
+        assert_eq!(
+            action.stride.to_bits(),
+            call.stride.to_bits(),
+            "initialized stride"
+        );
+        action.apply(state, time_step, &mut ours);
         let worst = ours
             .iter()
             .zip(game)

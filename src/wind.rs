@@ -254,6 +254,25 @@ pub struct WindAction<'a> {
     pub normals: bool,
 }
 
+impl<'a> WindAction<'a> {
+    /// Elden Ring 1.17.3's action after cloth initialization, with the sim's own masses and normals policy.
+    ///
+    /// The action constructor at RVA `0x26b7f60` sets stiffness to 10. Cloth initialization at `0xc4c4e0`
+    /// enables global wind through `0x2673920`, then loads 0.6 at `0xc4c5c8` and passes it to `0x26738e0`.
+    /// That setter clamps the value to [0, 1] before writing the stride. These are executable policy,
+    /// not fields of a cloth tagfile. The game-capture test checks both against every recorded action call.
+    pub fn elden_ring(wind: V4, mass: &'a [f32], total_mass: f32, normals: bool) -> Self {
+        Self {
+            wind,
+            stiffness: 10.0,
+            stride: 0.6,
+            mass,
+            total_mass,
+            normals,
+        }
+    }
+}
+
 impl Action for WindAction<'_> {
     fn apply(&mut self, state: &SimState, time_step: f32, forces: &mut [V4]) {
         let w = self.wind;
