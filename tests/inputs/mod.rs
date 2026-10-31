@@ -43,7 +43,7 @@ primase_testdata::inputs! {
         Query::Oracle(OracleSet::Capture, Game::Elden, "havok-cloth") => {
             status: Live,
             gate: false,
-            about: r#"cloth steps of the player's armour ropes, recorded from the running game, laid out as for Sekiro (`CLF5`; tagfiles of the Elden Ring havok-cloth corpus), and for a capture in the wind a `CLW1` wind file beside its frames file: what the game's wind action read on each call (the effect clock, the action's parameters, the force fields' parameters) (layouts in tests/game_capture.rs); tests/game_capture.rs replays them"#,
+            about: r#"cloth steps of the player's armour ropes, recorded from the running game, laid out as for Sekiro (`CLF5`; tagfiles of the Elden Ring havok-cloth corpus), and for a capture in the wind a `CLW1` wind file beside its frames file: what the game's wind action read on each call (the effect clock, the action's parameters, the force fields' parameters); also skin-captures.tsv and CSK1 paired skin calls, with runtime inverse binds as replay oracles only (layouts in tests/game_capture.rs); tests/game_capture.rs replays them"#,
             source: r#"the recorder's capture of the game in play, cut to one cloth data's steps"#,
         },
     }

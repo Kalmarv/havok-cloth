@@ -39,6 +39,12 @@
 //!   falls off, and `f32` its origin (three), its direction (four), weight, fade scale, fade low, fade high, fade mid,
 //!   falloff radius, wave length, wave offset, gust strength, gust length, gust scale, gust offset, gust rise, gust
 //!   fall and gust rest, as the game held them when the action read them.
+//!
+//! `skin-captures.tsv` has the same four columns as `captures.tsv`. Its `CSK1` files hold three `u32` (calls,
+//! vertices, selected bones), the selected bone indices (`u32` each), and their runtime inverse binds (matrices).
+//! Each call holds its frame and MXCSR (`u32` each), mesh-from-world matrix, selected world-bone matrices, then
+//! the output positions and normals (three `f32` per vertex each). Runtime definitions are replay oracles only;
+//! they do not supply a load-time conversion or repair of the installed definitions.
 #![allow(
     clippy::unwrap_used,
     reason = "a real-data test reports what it cannot read as its failure"
@@ -406,6 +412,110 @@ fn captures(game: Game) -> Vec<Capture> {
     }
     expect_found(query, "captures", out.len());
     out
+}
+
+/// The installed inverse binds do not reproduce this capture. Substituting only the runtime inverse binds
+/// reproduces every position and normal; their producer remains unknown. This test deliberately exercises both
+/// definitions, so a passing replay cannot hide a different route or an ineffective observation.
+#[test]
+fn the_skin_capture_distinguishes_installed_and_runtime_inverse_binds() {
+    let query = Query::Oracle(OracleSet::Capture, Game::Elden, "havok-cloth");
+    let Some(dir) = resolve(query) else { return };
+    let Some(corpus) = resolve(Query::Oracle(OracleSet::Corpus, Game::Elden, "havok-cloth")) else {
+        return;
+    };
+    let list = std::fs::read_to_string(dir.join("skin-captures.tsv")).unwrap();
+    let mut captures = 0;
+    for line in list.lines().skip(1).filter(|l| !l.trim().is_empty()) {
+        let columns: Vec<_> = line.split('\t').collect();
+        let [frames, tagfile, cloth_name, _processor] = columns.as_slice() else {
+            panic!("skin-captures.tsv: not four columns: {line}");
+        };
+        let bytes = std::fs::read(corpus.join(tagfile)).unwrap();
+        let tag = Tagfile::read(&bytes, None).unwrap();
+        let physics = cloth::read(&tag).unwrap();
+        let c = physics.cloths.iter().find(|c| c.name == *cloth_name).unwrap();
+        let op = c
+            .operators
+            .iter()
+            .find(|op| matches!(op.kind, OperatorKind::ObjectSpaceSkin { output_buffer: 0, .. }))
+            .expect("the capture skins buffer zero");
+        let OperatorKind::ObjectSpaceSkin {
+            components,
+            bone_from_skin_mesh,
+            transform_subset,
+            deformer,
+            local,
+            local_unpacked,
+            ..
+        } = &op.kind
+        else {
+            unreachable!()
+        };
+        let bytes = std::fs::read(dir.join(frames)).unwrap();
+        assert_eq!(&bytes[..4], b"CSK1");
+        let mut r = Reader(&bytes[4..]);
+        let [calls, vertices, selected] = [(); 3].map(|()| r.u32() as usize);
+        assert_eq!((calls, vertices, selected), (1500, 10, 3));
+        let subset: Vec<_> = (0..selected).map(|_| u16::try_from(r.u32()).unwrap()).collect();
+        assert_eq!(&subset, transform_subset);
+        assert_eq!(bone_from_skin_mesh.len(), selected);
+        let runtime: Vec<_> = (0..selected).map(|_| r.mat().to_columns()).collect();
+        let changed = runtime
+            .iter()
+            .flatten()
+            .zip(bone_from_skin_mesh.iter().flatten())
+            .filter(|(a, b)| a.to_bits() != b.to_bits())
+            .count();
+        assert_eq!(changed, 12, "the runtime definition differs in twelve lanes");
+        let blocks = if local.is_empty() {
+            LocalBlocks::Unpacked(local_unpacked)
+        } else {
+            LocalBlocks::Packed(local)
+        };
+        let mut mismatches = [[0usize; 2]; 2];
+        for _ in 0..calls {
+            let frame = r.u32();
+            let mxcsr = r.u32();
+            assert_eq!(mxcsr & 0xe040, 0x8000, "frame {frame}: nearest, FTZ on, DAZ off");
+            let mesh_from_world = r.mat();
+            let mut bones = vec![Mat4::IDENTITY; usize::from(*subset.iter().max().unwrap()) + 1];
+            for &index in &subset {
+                bones[usize::from(index)] = r.mat();
+            }
+            let mut xyz = || -> Vec<[u32; 3]> { (0..vertices).map(|_| [(); 3].map(|()| r.u32())).collect() };
+            let expected = [xyz(), xyz()];
+            for (mode, binds) in [runtime.as_slice(), bone_from_skin_mesh.as_slice()]
+                .into_iter()
+                .enumerate()
+            {
+                let composite = deform::composite_matrices(&mesh_from_world, &bones, &subset, binds);
+                let mut out = Buffer::new(vertices);
+                deform::deform(deformer, blocks, *components, &composite, &mut out);
+                for (component, values) in [&out.positions, &out.normals].into_iter().enumerate() {
+                    let different = values
+                        .iter()
+                        .zip(&expected[component])
+                        .any(|(v, want)| [v.0[0].to_bits(), v.0[1].to_bits(), v.0[2].to_bits()] != *want);
+                    if mode == 0 {
+                        assert!(
+                            !different,
+                            "{frames} frame {frame}: runtime component {component}"
+                        );
+                    }
+                    mismatches[mode][component] += usize::from(different);
+                }
+            }
+        }
+        assert!(r.0.is_empty(), "bytes after the last skin call");
+        assert_eq!(
+            mismatches,
+            [[0, 0], [77, 110]],
+            "{frames}: position/normal mismatch calls"
+        );
+        captures += 1;
+    }
+    expect_found(query, "skin captures", captures);
 }
 
 /// The sim cloth the cloth data's (first) simulate operator steps, and its first configuration.
