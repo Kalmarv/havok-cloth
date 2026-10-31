@@ -17,3 +17,4 @@ pub mod operators;
 pub mod simd;
 pub mod simulate;
 pub mod volume;
+pub mod wind;
