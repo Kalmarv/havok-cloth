@@ -13,7 +13,7 @@ repository = "https://github.com/Kalmarv/havok-cloth"
 publish = true
 
 [dependencies]
-havok-formats = { version = "0.9.0", git = "https://github.com/Kalmarv/havok-formats", rev = "f681dd1375a6d05666cc998c581defe47d326063" }
+havok-formats = { version = "0.9.0", git = "https://github.com/Kalmarv/havok-formats", rev = "eb2aba273217c2ece6e5a59981ddfd6b41a02497" }
 thiserror = { version = "=2.0.21", default-features = false, features = ["std"] }
 
 [dev-dependencies]
