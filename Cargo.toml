@@ -17,7 +17,7 @@ havok-formats = { version = "0.9.0", git = "https://github.com/Kalmarv/havok-for
 thiserror = { version = "=2.0.21", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-primase-testdata = { version = "0.1.6", git = "https://github.com/Kalmarv/primase-testdata", rev = "fe402dbf2b2a36a6cf0a6dc4b5df7137c7465db7" }
+primase-testdata = { version = "0.1.7", git = "https://github.com/Kalmarv/primase-testdata", rev = "0a6113b4c5f563c74dfaa5da43f74cb60de8f312" }
 
 [lints.rust]
 unsafe_code = "deny"
