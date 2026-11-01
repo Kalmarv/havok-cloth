@@ -414,11 +414,11 @@ fn captures(game: Game) -> Vec<Capture> {
     out
 }
 
-/// The installed inverse binds do not reproduce this capture. Substituting only the runtime inverse binds
-/// reproduces every position and normal; their producer remains unknown. This test deliberately exercises both
-/// definitions, so a passing replay cannot hide a different route or an ineffective observation.
+/// The installed inverse binds of the table's explicitly stated asset equal its recorded runtime definition,
+/// and both reproduce every recorded position and normal. The capture's saved chest item 871100 names protector
+/// model 1361; comparing the other asset 1360 was the cause of the former apparent bind and skin differences.
 #[test]
-fn the_skin_capture_distinguishes_installed_and_runtime_inverse_binds() {
+fn the_skin_capture_matches_the_installed_binds_of_its_stated_asset() {
     let query = Query::Oracle(OracleSet::Capture, Game::Elden, "havok-cloth");
     let Some(dir) = resolve(query) else { return };
     let Some(corpus) = resolve(Query::Oracle(OracleSet::Corpus, Game::Elden, "havok-cloth")) else {
@@ -467,7 +467,7 @@ fn the_skin_capture_distinguishes_installed_and_runtime_inverse_binds() {
             .zip(bone_from_skin_mesh.iter().flatten())
             .filter(|(a, b)| a.to_bits() != b.to_bits())
             .count();
-        assert_eq!(changed, 12, "the runtime definition differs in twelve lanes");
+        assert_eq!(changed, 0, "the stated asset's installed and runtime binds agree");
         let blocks = if local.is_empty() {
             LocalBlocks::Unpacked(local_unpacked)
         } else {
@@ -510,7 +510,7 @@ fn the_skin_capture_distinguishes_installed_and_runtime_inverse_binds() {
         assert!(r.0.is_empty(), "bytes after the last skin call");
         assert_eq!(
             mismatches,
-            [[0, 0], [77, 110]],
+            [[0, 0], [0, 0]],
             "{frames}: position/normal mismatch calls"
         );
         captures += 1;
@@ -696,7 +696,7 @@ const AT_REFERENCE_LENGTH: [(&str, usize); 8] = [
     ("kusazuri-cap6.clf5", 115),
     ("sleeve-cap6.clf5", 115),
     ("rearrope-cap1.clf5", 123),
-    ("rearrope-wind2.clf5", 123),
+    ("rearrope-wind-new.clf5", 123),
 ];
 
 /// The transform set a cloth data reads is the skeleton of its name in the same tagfile, bone for bone, in world
@@ -800,28 +800,7 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
                 }
             }
         }
-        // Skinning has an open 1-2 ulp discrepancy with the game. This capture's twelve known lanes differ by
-        // exactly one bit step, in the directions below; every other lane must still match. Keep the case visible
-        // while its cause is investigated, then replace this list with exact equality when skinning is fixed.
-        let known_skin_lanes: &[(usize, usize, usize, i64)] = if capture.name == "rearrope-wind2.clf5" {
-            assert_eq!(capture.steps.len(), 1499, "the wind capture's step count");
-            &[
-                (544, 8, 2, 1),
-                (544, 9, 2, 1),
-                (656, 8, 0, 1),
-                (656, 9, 0, 1),
-                (858, 8, 0, 1),
-                (858, 9, 0, 1),
-                (935, 8, 0, 1),
-                (935, 9, 0, 1),
-                (1195, 8, 0, 1),
-                (1195, 9, 0, 1),
-                (1490, 8, 0, -1),
-                (1490, 9, 0, -1),
-            ]
-        } else {
-            &[]
-        };
+        let known_skin_lanes: &[(usize, usize, usize, i64)] = &[];
         assert_eq!(
             divergent_skin_lanes, known_skin_lanes,
             "{}: pinned skin differences (step, particle, lane, signed bit difference)",
