@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- `examples/drape.rs`: a sheet built in code, with no game file, dropped over a ball and written as glTF a frame: the
+  one the README's animation shows.
+
 ## 0.2.1 (2026-10-29)
 
 - `instance`: an operator reads the triangles of the buffer it names, also where the state holds that buffer's

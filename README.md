@@ -7,8 +7,10 @@ the same inputs give the game's particle positions to the bit on the machine the
 
 <img src="docs/cloth-drape.webp" width="480" alt="A square sheet dropping over a ball onto a floor, simulated with havok-cloth">
 
-A square sheet dropped over a ball, stepped by havok-cloth at 30 frames a second from cloth data built for the shot (a grid of
-particles with stretch, shear and bend links, and a sphere and a plane collidable; no game file).
+A square sheet dropped over a ball, stepped by havok-cloth at 30 frames a second from cloth data built in code (a grid
+of particles with stretch, shear and bend links, and a sphere and a plane collidable; no game file).
+[`examples/drape.rs`](examples/drape.rs) builds it and writes each frame as glTF:
+`cargo run --release --example drape -- OUT_DIR`.
 
 ## What it simulates
 
