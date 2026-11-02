@@ -52,7 +52,7 @@ pub struct ClothInstance<D: Deref<Target = Cloth> + Clone> {
     pub buffers: Vec<Buffer>,
     /// Each buffer's triangles (three vertex indices each): the definition's, a sim cloth's for its particle buffers,
     /// and whatever the caller sets for its display buffers. An operator reads those of the buffer it names, also where
-    /// the state holds that buffer's vertices in a shadow buffer ([`ClothInstance::resolve`]).
+    /// the state holds that buffer's vertices in a shadow buffer.
     pub triangles: Vec<Vec<u16>>,
     /// The sim cloths' states, by sim cloth.
     pub sims: Vec<SimState>,
