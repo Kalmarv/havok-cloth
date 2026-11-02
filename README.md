@@ -5,6 +5,12 @@ A Rust library that simulates Havok cloth as Sekiro and Elden Ring run it, from 
 contains no Havok SDK code. Its behaviour is checked against cloth motion recorded from the running games, so that
 the same inputs give the game's particle positions to the bit on the machine they were recorded on.
 
+<p align="center"><img src="docs/drape.webp" width="480" alt="A plaid sheet falls onto a metal ball and drapes over it"></p>
+
+The solver is not tied to the games' files: above, a sheet built in code (a grid of particles with structural, shear
+and bend links) falls onto a sphere and a floor plane. [`examples/drape.rs`](examples/drape.rs) builds it and writes
+each frame as glTF: `cargo run --release --example drape -- OUT_DIR`.
+
 ## What it simulates
 
 - **Integration**: Verlet steps with the sim cloth's gravity and per-second damping, substeps, the rescaling of the

@@ -99,6 +99,7 @@ version = "0.2.1"
 dependencies = [
  "havok-formats",
  "primase-testdata",
+ "serde_json",
  "thiserror",
 ]
 
