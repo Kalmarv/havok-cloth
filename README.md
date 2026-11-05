@@ -1,126 +1,77 @@
 # havok-cloth
 
-A Rust library that simulates Havok cloth as Sekiro and Elden Ring run it, from the cloth data their tagfiles store
-(read with [havok-formats](https://github.com/Kalmarv/havok-formats)). It is an independent implementation and
-contains no Havok SDK code. Its behaviour is checked against cloth motion recorded from the running games, so that
-the same inputs give the game's particle positions to the bit on the machine they were recorded on.
+A Rust library that simulates Havok cloth data the way Sekiro and Elden Ring run it. It steps the cloth data that [havok-formats](https://github.com/Kalmarv/havok-formats) reads from the games' tagfiles and does not read files itself.
+
+## Features
+
+- Runs a cloth data's states as cloth instances, executing every operator class the two games' files use
+- Verlet integration with substeps, damping, timestep changes and pinned particles
+- Standard, stretch, compressible and bend links, bend stiffness, local range, transition and volume constraints
+- Legacy and adaptive stiffness models, with legacy as the default as in the games
+- Collision with spheres, capsules, tapered capsules, planes and convex geometry, with friction, moved by the bones they follow
+- Virtual collision points, and landscape collision against contact planes the caller supplies
+- Object-space and bone-space skinning, and mesh-to-mesh deformation through triangle frames
+- Vertex operators: copy, gather, moving particles to skinned vertices, and normal, tangent and bitangent updates
+- Bones driven by the simulated mesh through the mesh bone deformers
+- Per-substep forces through an `Action` trait, including Elden Ring's wind action (on `main`, not yet released)
+- `f32` arithmetic in the games' operation order, using the processor's `rcpps`/`rsqrtps` estimates on x86-64
+- Identical inputs give bit-identical results, and recorded game steps replay bit for bit on the processor they were recorded on
+- Contains no Havok SDK code
+
+## Getting Started
+
+### Requirements
+
+- Rust 1.99 or newer (`rust-toolchain.toml` selects 1.99.0)
+- Cloth tagfiles (`TAG0`) from your own copy of Sekiro or Elden Ring, extracted from the game's binders and DCX compression. The repository contains no game data.
+
+### Installation
+
+The latest release, 0.2.1, is on crates.io. Add it together with the havok-formats version it reads (0.9):
+
+```sh
+cargo add havok-cloth havok-formats@0.9
+```
+
+The wind action and the `drape` example are only on `main`. To use them, depend on this repository by git, and on havok-formats at the revision `main` pins in `Cargo.toml`, so that both crates share the same cloth types.
+
+### Usage
+
+Read a tagfile with havok-formats, make an instance of each cloth data, and step it:
+
+```rust
+use havok_cloth::instance::ClothInstance;
+use havok_formats::{Tagfile, cloth};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = std::fs::read("c1080_c.hkx")?;
+    let physics = cloth::read(&Tagfile::read(&bytes, None)?)?;
+    for data in &physics.cloths {
+        let mut instance = ClothInstance::new(data)?;
+        for _frame in 0..60 {
+            // Before each step, set instance.transform_sets[0][i] to the world transform of bone i of the
+            // skeleton with the transform set's name in the same tagfile. They stay at the identity here.
+            instance.step(1.0 / 30.0, &mut [])?;
+        }
+        for (sim, state) in data.sim_cloths.iter().zip(&instance.sims) {
+            println!("{}: first particle at {:?}", sim.name, state.positions.first());
+        }
+    }
+    Ok(())
+}
+```
+
+`ClothInstance::new` returns an error for a cloth data that uses an operator class the crate does not implement. For lower-level use, `simulate::prepare` and `simulate::simulate` step a single sim cloth, and `simulate::Action` adds forces on every substep.
+
+The `drape` example builds a sheet in code, drops it over a ball at 30 frames per second and writes each frame as glTF (`frame_NNN.gltf`, `frame_NNN.bin` and `sheet.png`). It needs no game files:
+
+```sh
+cargo run --release --example drape -- OUT_DIR [FRAMES]
+```
 
 <p>
 <img src="docs/cloth-drape.webp" width="400" alt="A square sheet dropping over a ball onto a floor, simulated with havok-cloth">
 <img src="docs/wolf-run.webp" width="400" alt="Sekiro's Wolf sprinting, the cloth of his outfit simulated with havok-cloth">
 </p>
 
-Left, a square sheet dropped over a ball, stepped by havok-cloth at 30 frames a second from cloth data built in code (a
-grid of particles with stretch, shear and bend links, and a sphere and a plane collidable; no game file).
-[`examples/drape.rs`](examples/drape.rs) builds it and writes each frame as glTF:
-`cargo run --release --example drape -- OUT_DIR`. Right, Sekiro's Wolf sprinting: the game's animation poses him, and
-havok-cloth steps the cloth of his outfit from the game's own cloth data.
-
-## What it simulates
-
-- **Integration**: Verlet steps with the sim cloth's gravity and per-second damping, substeps, the rescaling of the
-  previous positions when the timestep changes, and pinned particles stepped linearly through the substeps.
-- **Constraint sets**, in each simulate configuration's order: standard, stretch, compressible and bend links, bend
-  stiffness (flat and with a rest curvature, clamped or not), local range (sphere, cylinder, position only),
-  transitions between animation and simulation, volume constraints, and the adaptive stiffness per substep.
-- **Collision** against the sim cloth's collidables: spheres, capsules, tapered capsules, planes and convex
-  geometries, moved by the bones they follow, with friction against their surface velocity; and the virtual
-  collision points sampled on the cloth's triangles and edges; and the landscape, as per-particle contact planes the
-  caller supplies (the games compute them from the world's collision geometry).
-- **Normals** of the particles from the sim cloth's triangles.
-- **Skinning and deformation**: the object-space and bone-space deformers that skin buffers and deform display
-  meshes from the simulated mesh (triangle frames), with their packed and float vertex blocks.
-- **Vertex operators**: copies, gathers, moving pinned particles to their skinned vertices, and the update of
-  normals, tangents and bitangents (all vertices or a selection).
-- **Bones driven by the cloth**: the mesh bone deformers that place bones on the simulated triangles.
-- **Cloth instances**: a cloth data's buffers and transform sets at run time, stepped one cloth state at a time, and
-  actions: forces the game adds on every substep.
-
-
-## Example
-
-```rust
-use havok_cloth::simulate::{self, ParticleData, SimState};
-use havok_formats::cloth::{self, OperatorKind};
-use havok_formats::Tagfile;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let bytes = std::fs::read("c1080_c.hkx")?;
-    let physics = cloth::read(&Tagfile::read(&bytes, None)?)?;
-    let data = &physics.cloths[0];
-    for op in &data.operators {
-        let OperatorKind::Simulate { sim_cloth, configs } = &op.kind else { continue };
-        let sim = &data.sim_cloths[*sim_cloth as usize];
-        let particles = ParticleData::new(sim);
-        let mut state = SimState::new(sim);
-        for _frame in 0..60 {
-            // the bone transforms that drive the collidables, world from bone, one a bone of the transform set
-            // (the skeleton of the transform set's name in the same file: transform i is its bone i)
-            let bones = [];
-            simulate::prepare(&mut state, 1.0 / 60.0, configs[0].sub_steps);
-            simulate::simulate(sim, &configs[0], &mut state, &particles, &[], &bones, &mut [], 1.0 / 60.0);
-        }
-        println!("{}: {:?}", sim.name, &state.positions[..4]);
-    }
-    Ok(())
-}
-```
-
-## What it guarantees
-
-- The arithmetic follows the games' own: `f32` throughout, one rounding per operation in the order the game's code
-  performs it (products and sums are never fused, three-lane dot products add x and y before z), the approximate
-  reciprocal and reciprocal square root where the game uses them, and the game's own polynomial where it computes an
-  arccosine.
-- Results vary in the last bits by CPU, as the games' do: the approximate reciprocal and reciprocal square root are the
-  processor's estimate instructions (`rcpps`, `rsqrtps`), whose results differ between processor makers. On x86-64 the
-  library issues the same instructions, so captures on one machine compare bit for bit; on other targets it uses the
-  exact reciprocal (square root), which matches the game's behaviour but not its last bits.
-- The same inputs give bit-identical results, run after run and in debug and release builds.
-- The particle, buffer and transform indices it follows are the ones havok-formats checks when it reads the data.
-
-## What it does not do
-
-- It does not read files: it takes havok-formats' cloth data, and the bone transforms and timestep the caller passes.
-- It does not run on the GPU or in parallel: one cloth steps on one thread (the games' task split does not change
-  their results).
-- It does not collide with world geometry (the games' landscape collision, which 13 Sekiro and 80 Elden Ring sim
-  cloths enable) beyond the contact planes a caller provides.
-- It does not implement the games' own actions: Sekiro adds a force to its characters' cloth at run time, which no
-  cloth file holds. A caller supplies such forces through `simulate::Action`.
-- It does not implement what neither game's data uses: anti-pinch constraints, transfer motion, state transitions,
-  blend operators.
-
-## Tests
-
-```sh
-cargo test
-GAME_DATA=game-data.toml cargo test --release
-```
-
-- **Unit tests** of each step on hand-built cloths, against values computed independently (closed forms in `f64`,
-  exact-arithmetic cases, conservation of momentum, a link restored to its length, a pinned particle unmoved).
-- **Real data**: with a [primase-testdata](https://github.com/Kalmarv/primase-testdata) configuration naming your own
-  copies of the games' cloth tagfiles (tests/inputs/README.md lists them), every sim cloth of both installs is
-  simulated and checked. Without it these tests skip.
-- **Game captures**: cloth recorded from the running games (each operator's inputs and outputs, frame by frame) is
-  replayed and compared bit for bit. Captures are game data and are never part of the repository; the tests skip
-  without them. A capture records the CPU it was made on, because of the last-bit differences above.
-
-`SimState::stiffness_model` selects the legacy or adaptive model; it is legacy by default, matching a newly
-created game instance. `prepare` reads it from the state. A configuration's `adaptConstraintStiffness` controls
-velocity retention over substeps rather than selecting that model. Vertex-frame operators use the named buffer's
-triangles even when its vertices are held in a state's shadow buffer.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Check the examples
-
-From the repository root, `cargo test -p havok-cloth --doc` checks the crate documentation, and
-`cargo build -p havok-cloth --examples` builds its example programs. Examples that read paths need the caller's files; the repository ships no game assets.
-
-## Licence
-
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+Run the tests with `cargo test`. The real-data and game-capture tests skip unless `GAME_DATA` names a [primase-testdata](https://github.com/Kalmarv/primase-testdata) configuration pointing at your own game files (see [tests/inputs/README.md](tests/inputs/README.md)). Capture replays are only compared on the processor the capture was recorded on. See [docs/behaviour.md](docs/behaviour.md) for the exactness rules and what the crate does not simulate, and [CONTRIBUTING.md](CONTRIBUTING.md) for the checks a change must pass. Licensed under GPL-3.0-or-later.
