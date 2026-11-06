@@ -1,5 +1,7 @@
 # havok-cloth
 
+[![crates.io: havok-cloth](https://img.shields.io/crates/v/havok-cloth?label=havok-cloth)](https://crates.io/crates/havok-cloth) [![docs.rs](https://img.shields.io/docsrs/havok-cloth)](https://docs.rs/havok-cloth) [![CI](https://img.shields.io/github/actions/workflow/status/Kalmarv/havok-cloth/ci.yml?branch=main&label=CI)](https://github.com/Kalmarv/havok-cloth/actions/workflows/ci.yml)
+
 A Rust library that simulates Havok cloth data the way Sekiro and Elden Ring run it. It steps the cloth data that [havok-formats](https://github.com/Kalmarv/havok-formats) reads from the games' tagfiles and does not read files itself.
 
 ## Features
