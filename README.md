@@ -15,7 +15,7 @@ A Rust library that simulates Havok cloth data the way Sekiro and Elden Ring run
 - Object-space and bone-space skinning, and mesh-to-mesh deformation through triangle frames
 - Vertex operators: copy, gather, moving particles to skinned vertices, and normal, tangent and bitangent updates
 - Bones driven by the simulated mesh through the mesh bone deformers
-- Per-substep forces through an `Action` trait, including Elden Ring's wind action (on `main`, not yet released)
+- Per-substep forces through an `Action` trait, including Elden Ring's wind action
 - `f32` arithmetic in the games' operation order, using the processor's `rcpps`/`rsqrtps` estimates on x86-64
 - Identical inputs give bit-identical results, and recorded game steps replay bit for bit on the processor they were recorded on
 - Contains no Havok SDK code
@@ -29,7 +29,7 @@ A Rust library that simulates Havok cloth data the way Sekiro and Elden Ring run
 
 ### Installation
 
-The latest release, 0.3.0, is on crates.io. Add it together with the havok-formats version it reads (0.9):
+Add it together with the havok-formats version it reads:
 
 ```sh
 cargo add havok-cloth havok-formats@0.9
