@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-06)
 
+- `wind`: Elden Ring's cloth wind, the game's own action rather than the cloth data's. `ForceField::sample` samples a
+  force field (its gusts as `Gust`) at the centre of the particles' bounds (`bounds_centre`) on the effect clock
+  (`clock`), `combine` sums the samples, and `global_wind` gives a cloth's wind from all the fields with weight, refusing
+  (`Unsupported`) a field of another kind than 0 or a local one, which the game applies per particle on a path not
+  reproduced. `WindAction::elden_ring` is the action that turns the wind into forces on the particles on every substep,
+  run as an `Action` of the simulate operator. Its arithmetic is single precision in the game's order, with the C
+  runtime's `sinf`; tests/game_capture.rs holds it to the forces the running game left on every call of a capture, bit
+  for bit (a capture's `wind` file, described there).
 - `examples/drape.rs`: a sheet built in code, with no game file, dropped over a ball and written as glTF a frame: the
   one the README's animation shows.
 

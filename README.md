@@ -29,13 +29,11 @@ A Rust library that simulates Havok cloth data the way Sekiro and Elden Ring run
 
 ### Installation
 
-The latest release, 0.2.1, is on crates.io. Add it together with the havok-formats version it reads (0.9):
+The latest release, 0.3.0, is on crates.io. Add it together with the havok-formats version it reads (0.9):
 
 ```sh
 cargo add havok-cloth havok-formats@0.9
 ```
-
-The wind action and the `drape` example are only on `main`. To use them, depend on this repository by git, and on havok-formats at the revision `main` pins in `Cargo.toml`, so that both crates share the same cloth types.
 
 ### Usage
 
