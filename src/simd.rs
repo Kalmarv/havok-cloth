@@ -7,9 +7,10 @@
 //!
 //! The approximate reciprocal and reciprocal square root the solver uses are the CPU's own estimate instructions
 //! (`rcpps`, `rsqrtps`). Their results differ in the last bits between processor makers, and the game's cloth differs
-//! with them. On x86-64 this module issues the same instructions, so on one machine the results equal the game's bit
-//! for bit; on other targets it computes the exact reciprocal (square root) instead, which matches the game's behaviour
-//! but not its last bits.
+//! with them. This module computes the estimates of the AMD processors the captures were made on, from their tables
+//! (`estimates.bin`, written by `examples/estimate_tables.rs`), on every machine and target: on an AMD Zen 2 they equal
+//! the instructions' results on all 2^32 inputs, and with them the solver equals the captures (made on a Zen 5) bit for
+//! bit wherever it runs.
 
 /// Four `f32` lanes, `x y z w`. A position or direction keeps its `w` lane as the operations leave it; the cloth
 /// code carries it through rather than clearing it.
@@ -28,42 +29,74 @@ pub fn max_ps(a: f32, b: f32) -> f32 {
     if a > b { a } else { b }
 }
 
-/// The CPU's reciprocal estimate of `x` (`rcpss`, about 12 bits) on x86-64; `1 / x` elsewhere.
+/// The tables of `estimates.bin`: for each table, the 12 significand bits of the estimate (exponent 126) of the input
+/// whose top 12 significand bits index it.
+static ESTIMATES: &[u8; 3 * 4096 * 2] = include_bytes!("estimates.bin");
+
+/// Entry `top` of table `table` (0: `rcpss` of `1.m`; 1 and 2: `rsqrtss` of `1.m` and of `2 * 1.m`), as the bits of
+/// the estimate with exponent 126.
+#[inline]
+fn estimate_entry(table: usize, top: u32) -> u32 {
+    let at = (table * 4096 + top as usize) * 2;
+    let bits = match ESTIMATES.get(at..at + 2) {
+        Some(&[lo, hi]) => u16::from_le_bytes([lo, hi]),
+        _ => 0,
+    };
+    (126 << 23) | (u32::from(bits) << 11)
+}
+
+/// The reciprocal estimate of `x` as AMD's `rcpss` computes it (12 significand bits). Zero and subnormal inputs give
+/// an infinity of their sign, infinities a zero of their sign, a NaN the same NaN made quiet, and an input whose
+/// reciprocal is subnormal a zero of its sign.
 #[inline]
 pub fn rcp_estimate(x: f32) -> f32 {
-    #[cfg(target_arch = "x86_64")]
-    #[allow(
-        unsafe_code,
-        reason = "the estimate instruction itself; SSE is part of every x86-64 CPU"
-    )]
-    {
-        use std::arch::x86_64::{_mm_cvtss_f32, _mm_rcp_ss, _mm_set_ss};
-        // SAFETY: the intrinsics need SSE, which the x86-64 baseline always has; they touch no memory.
-        unsafe { _mm_cvtss_f32(_mm_rcp_ss(_mm_set_ss(x))) }
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        1.0 / x
+    let b = x.to_bits();
+    let sign = b & 0x8000_0000;
+    let exponent = (b >> 23) & 0xff;
+    let significand = b & 0x7f_ffff;
+    match exponent {
+        0 => f32::from_bits(sign | 0x7f80_0000),
+        0xff if significand != 0 => f32::from_bits(b | 0x40_0000),
+        0xff => f32::from_bits(sign),
+        _ => {
+            let r = estimate_entry(0, significand >> 11);
+            // 1/x for x = 1.m * 2^(e-127) is the table's 1/1.m (exponent 126) times 2^(127-e)
+            match 253u32.checked_sub(exponent).filter(|&e| e > 0) {
+                Some(e) => f32::from_bits(sign | (e << 23) | (r & 0x7f_ffff)),
+                None => f32::from_bits(sign),
+            }
+        }
     }
 }
 
-/// The CPU's reciprocal square root estimate of `x` (`rsqrtss`, about 12 bits) on x86-64; `1 / sqrt(x)` elsewhere.
+/// The reciprocal square root estimate of `x` as AMD's `rsqrtss` computes it (12 significand bits). Zero and
+/// subnormal inputs give an infinity of their sign, +infinity gives +0, a NaN the same NaN made quiet, and any other
+/// negative input the default NaN.
 #[inline]
 pub fn rsqrt_estimate(x: f32) -> f32 {
-    #[cfg(target_arch = "x86_64")]
-    #[allow(
-        unsafe_code,
-        reason = "the estimate instruction itself; SSE is part of every x86-64 CPU"
-    )]
-    {
-        use std::arch::x86_64::{_mm_cvtss_f32, _mm_rsqrt_ss, _mm_set_ss};
-        // SAFETY: the intrinsics need SSE, which the x86-64 baseline always has; they touch no memory.
-        unsafe { _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(x))) }
+    let b = x.to_bits();
+    let exponent = (b >> 23) & 0xff;
+    let significand = b & 0x7f_ffff;
+    if exponent == 0 {
+        return f32::from_bits((b & 0x8000_0000) | 0x7f80_0000);
     }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        1.0 / x.sqrt()
+    if exponent == 0xff && significand != 0 {
+        return f32::from_bits(b | 0x40_0000);
     }
+    if b >> 31 != 0 {
+        return f32::from_bits(0xffc0_0000);
+    }
+    if exponent == 0xff {
+        return 0.0;
+    }
+    // x = 1.m * 2^(e-127); with an odd e - 127 the table of 2 * 1.m (exponent 128) holds 1/sqrt of the significand
+    let odd = (exponent & 1) == 0;
+    let base: u32 = if odd { 128 } else { 127 };
+    let r = estimate_entry(if odd { 2 } else { 1 }, significand >> 11);
+    // the estimate's exponent is 126 + (base - e) / 2, which (base - e even, e at most 254) is (252 + base - e) / 2:
+    // from 62 to 189, never under- or overflowing
+    let e = (252 + base - exponent) / 2;
+    f32::from_bits((e << 23) | (r & 0x7f_ffff))
 }
 
 /// The refined ("23-bit") reciprocal: the estimate `r` and one Newton step, `r * (2 - x*r)`.

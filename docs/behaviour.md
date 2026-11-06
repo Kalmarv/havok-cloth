@@ -3,7 +3,7 @@
 ## Exactness
 
 - Arithmetic is `f32` throughout, with one rounding per operation in the order the games' code performs it. Products and sums are never fused, and three-lane dot products add x and y before z (`src/simd.rs` names the primitives).
-- The approximate reciprocal and reciprocal square root are the processor's estimate instructions (`rcpps`, `rsqrtps`) on x86-64. Their results differ between processor makers, as the games' do, so captures compare bit for bit only on the machine type they were recorded on. On other targets the crate uses the exact reciprocal (square root), which matches the games' behaviour but not their last bits.
+- The approximate reciprocal and reciprocal square root are AMD's estimate instructions (`rcpps`, `rsqrtps`), computed from their tables on every machine and target. The games' results differ between processor makers; these are the ones of the AMD processors the captures were recorded on, so the simulate step replays the captures bit for bit everywhere. The wind action's `sinf` is the C runtime's, which picks its code path by processor, so the wind replay is compared only on the capture's processor.
 - Where the games compute an arcsine or arccosine, the crate uses the same polynomial.
 - The same inputs give bit-identical results from run to run.
 - Elden Ring's wind action takes its sines from the C runtime's single-precision `sinf`, which is what the game uses on Windows.

@@ -16,8 +16,8 @@ A Rust library that simulates Havok cloth data the way Sekiro and Elden Ring run
 - Vertex operators: copy, gather, moving particles to skinned vertices, and normal, tangent and bitangent updates
 - Bones driven by the simulated mesh through the mesh bone deformers
 - Per-substep forces through an `Action` trait, including Elden Ring's wind action
-- `f32` arithmetic in the games' operation order, using the processor's `rcpps`/`rsqrtps` estimates on x86-64
-- Identical inputs give bit-identical results, and recorded game steps replay bit for bit on the processor they were recorded on
+- `f32` arithmetic in the games' operation order, with AMD's `rcpps`/`rsqrtps` estimates computed from their tables on every machine
+- Identical inputs give bit-identical results on every machine, and recorded game steps replay bit for bit
 - Contains no Havok SDK code
 
 ## Getting Started
@@ -74,4 +74,4 @@ cargo run --release --example drape -- OUT_DIR [FRAMES]
 <img src="docs/wolf-run.webp" width="400" alt="Sekiro's Wolf sprinting, the cloth of his outfit simulated with havok-cloth">
 </p>
 
-Run the tests with `cargo test`. The real-data and game-capture tests skip unless `GAME_DATA` names a [primase-testdata](https://github.com/Kalmarv/primase-testdata) configuration pointing at your own game files (see [tests/inputs/README.md](tests/inputs/README.md)). Capture replays are only compared on the processor the capture was recorded on. See [docs/behaviour.md](docs/behaviour.md) for the exactness rules and what the crate does not simulate, and [CONTRIBUTING.md](CONTRIBUTING.md) for the checks a change must pass. Licensed under GPL-3.0-or-later.
+Run the tests with `cargo test`. The real-data and game-capture tests skip unless `GAME_DATA` names a [primase-testdata](https://github.com/Kalmarv/primase-testdata) configuration pointing at your own game files (see [tests/inputs/README.md](tests/inputs/README.md)). The wind replay is only compared on the processor its capture was recorded on. See [docs/behaviour.md](docs/behaviour.md) for the exactness rules and what the crate does not simulate, and [CONTRIBUTING.md](CONTRIBUTING.md) for the checks a change must pass. Licensed under GPL-3.0-or-later.

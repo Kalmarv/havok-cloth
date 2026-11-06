@@ -6,6 +6,14 @@
   does: that equals all 1,414 distinct damping values of the Sekiro and Elden Ring captures, where glibc's
   single-precision `powf` was one unit in the last place off on one of them (Elden Ring's rope, `rearrope-cap1`), so
   tests/game_capture.rs failed on Linux. The value is now the same on every machine.
+- `simd::rcp_estimate` and `simd::rsqrt_estimate` compute AMD's `rcpss` and `rsqrtss` from their tables
+  (`src/estimates.bin`, written by `examples/estimate_tables.rs` on an AMD CPU) on every machine and target, instead of
+  issuing the instructions of the CPU at hand: an Intel CPU's estimates differ in the last bits, which failed
+  `volume`'s eigen-decomposition test on an Intel CI runner and made the solver's results depend on the processor. The
+  tables equal an AMD Zen 2's instructions on all 2^32 inputs, and with them the simulate step equals all 779 steps of
+  the captures (made on a Zen 5), so tests/game_capture.rs now compares the simulate step on every processor. The wind
+  action's comparison stays on the capture's processor: its `sinf` is the C runtime's. The crate no longer uses
+  `unsafe` code.
 
 ## 0.3.0 (2026-11-06)
 

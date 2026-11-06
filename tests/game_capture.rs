@@ -811,19 +811,12 @@ fn the_notify_and_the_pinned_particles_match_the_game_bit_for_bit() {
 
 /// The whole simulate step from the state after the notify, with the game's own action forces and the instance's
 /// constraint states played back: positions, previous positions, the collidables and the constraint states after the
-/// step, bit for bit in every step of every capture that holds what a step reads. Compared only on the processor the
-/// capture was made on (the approximate reciprocals differ between processors).
+/// step, bit for bit in every step of every capture that holds what a step reads, on any processor (the approximate
+/// reciprocals are the capture processor's, computed from its tables: [`havok_cloth::simd`]).
 #[test]
 fn the_simulate_step_matches_the_game_bit_for_bit() {
     let mut failed = Vec::new();
     for capture in [Game::Sekiro, Game::Elden].into_iter().flat_map(captures) {
-        if std::env::var("PROCESSOR_IDENTIFIER").ok().as_deref() != Some(capture.processor.as_str()) {
-            eprintln!(
-                "{}: made on {}, not compared on another processor",
-                capture.name, capture.processor
-            );
-            continue;
-        }
         // a capture made before the recorder kept the game's action calls holds none in any step: its forces are
         // unknown
         if capture.steps.iter().all(|s| s.actions.is_empty()) {
@@ -990,6 +983,9 @@ fn the_simulate_step_matches_the_game_bit_for_bit() {
 /// forces the game's call left, all four lanes, bit for bit, on every call of every capture with a wind file, on the
 /// processor it was made on. Each step starts from the game's state after the notify, with the normals the last step
 /// ended with (the sim's, computed from the positions the step starts from), and goes on with the game's forces.
+/// Compared only on the processor the capture was made on: the action's `sinf` is the C runtime's, which picks its
+/// code path by the processor's features, and neither glibc's `sinf` nor a rounded double `sin` equals it on every
+/// call (one call of the 1,499 differs by 1 or 2 units in the last place).
 ///
 /// The rope's capture in the wind (Elden Ring, offline, in Stormveil Castle): 1,499 calls, one force field of kind 0
 /// in each (its fields as the game held them, its origin included: where the game places it is not reproduced).
