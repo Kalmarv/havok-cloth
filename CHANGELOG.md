@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 (2026-11-06)
+
+- `simulate::damping` evaluates `pow(1 - per_second, dt)` in double precision and rounds it, as the game's `powf`
+  does: that equals all 1,414 distinct damping values of the Sekiro and Elden Ring captures, where glibc's
+  single-precision `powf` was one unit in the last place off on one of them (Elden Ring's rope, `rearrope-cap1`), so
+  tests/game_capture.rs failed on Linux. The value is now the same on every machine.
+
 ## 0.3.0 (2026-11-06)
 
 - `wind`: Elden Ring's cloth wind, the game's own action rather than the cloth data's. `ForceField::sample` samples a

@@ -204,6 +204,16 @@ fn the_damping_factor_is_none_full_or_a_power() {
     assert!((k - 0.9f64.powf(0.5)).abs() < 1e-6);
 }
 
+/// The damping is the game's to the last bit on every machine: a pair from the rope capture of Elden Ring
+/// (`rearrope-cap1`, step 8), where a single-precision `powf` (glibc's) gives one unit in the last place more.
+#[test]
+fn the_damping_factor_is_the_games_to_the_bit() {
+    // black_box: computed at run time, not folded at compile time
+    let per_second = std::hint::black_box(f32::from_bits(1_063_675_494));
+    let dt = std::hint::black_box(f32::from_bits(1_018_802_934));
+    assert_eq!(simulate::damping(per_second, dt).to_bits(), 1_064_499_977);
+}
+
 #[test]
 fn a_new_timestep_keeps_the_velocity_per_second() {
     let sim = sim_cloth(&[v(0.0, 0.0, 0.0)], &[1.0], Vec::new());
